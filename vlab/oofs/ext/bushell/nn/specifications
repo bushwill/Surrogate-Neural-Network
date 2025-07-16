@@ -1,0 +1,95 @@
+lsystem.l
+lsystem-time.l
+lsystem-multi.l
+view.v
+view-time.v
+view-multi.v
+anim.a
+contours.cset
+functions.fset
+functions.tset
+materials.mat
+description.txt
+parameters.vset
+lsystem.pnl
+Plant_063-32.tar.z
+loop_over_pipeline.py
+lpfgLoop.py
+lpfgLoop_offspring.py
+pipeline_script.py
+plant_comparison.py
+allleafnumbers.csv
+leafnumber.csv
+loop_parameters.vset
+project.tar.z
+project.cpp
+ignore:
+glm
+Plant_001-9
+log.txt
+synthetic_images
+Plant_063-32
+lsys.so
+lpfg.log
+lsys.ii
+lsysinp.cpp
+lsys.o
+input.i
+*.swp
+temp*
+*
+extract images:
+	tar -xzvf Plant_063-32.tar.z
+
+calibration step 1:
+	run:
+		lpfg -wpr 0 0 -w 800 600 -rmode cont lsystem-multi.l view-multi.v anim.a materials.mat contours.cset functions.fset functions.tset parameters.vset & gallery -rmode cont functions.fset & panel -rmode cont lsystem.pnl | awkped parameters.vset
+	L-system:
+		EDIT lsystem-multi.l
+	view:
+		EDIT view-multi.v
+calibration step 2:
+	run:
+		lpfg -wpr 0 0 -w 1920 600 -rmode cont lsystem-time.l view-time.v anim.a materials.mat contours.cset functions.fset functions.tset parameters.vset & timeline -rmode cont functions.tset & gallery -rmode cont functions.fset	 & panel -rmode cont lsystem.pnl | awkped parameters.vset
+	L-system:
+		EDIT lsystem-time.l
+	view:
+		EDIT view-time.v
+
+generate images:
+	run:
+		python lpfgLoop.py
+	L-system:
+		EDIT lsystem.l
+	view:
+		EDIT view.v	
+generate offspring:
+	run:
+		python lpfgLoop_offspring.py
+	L-system:
+		EDIT lsystem.l
+	view:
+		EDIT view.v	
+
+animation:
+	EDIT anim.a
+
+materials:
+	MEDIT materials.mat
+
+contours:
+	gallery:
+		gallery contours.cset
+	EDIT contours.cset
+
+functions:
+	gallery:
+		gallery functions.fset
+	EDIT functions.fset
+
+timeline:
+    Timeline functions.tset
+
+description:
+	EDIT description.txt
+

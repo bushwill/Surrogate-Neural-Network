@@ -1,0 +1,12 @@
+version: "3.9"
+
+services:
+  app1:
+    container_name: vlab_nn_surrogate
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6080:6080"
