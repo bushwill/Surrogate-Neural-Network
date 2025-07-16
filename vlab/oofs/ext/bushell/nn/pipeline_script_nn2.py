@@ -1,3 +1,10 @@
+"""
+This script uses batch_plant_surrogate_model.pt to train an optimizer network
+to optimize plant parameters, which are then evaluated against real plant data.
+It saves the best parameters and their corresponding cost.
+It doesn't work well. 
+"""
+
 import torch
 import torch.nn as nn
 import numpy as np

@@ -3,6 +3,7 @@ from numpy.random import uniform as uran
 import os
 import subprocess
 import shutil
+from plant_comparison_nn import calculate_cost, read_real_plants
 
 def generate_plant(param_file, output_dir):
     """
@@ -113,3 +114,66 @@ def build_random_parameter_file(dir_name):
     f.write('#define ExpIntRad ' + str(exp_int_rad) + '\n')
     f.close()
     return [max_phy, plast, plant_roll_angle, plant_down_angle, branch_angle, leaf_len, exp_leaf_wid, leaf_wid, leaf_bend_scale, leaf_twist_scale, node_len, int_wid, exp_int_rad]
+
+def generate_and_evaluate(param_file, real_bp, real_ep):
+    # Run lpfg to generate the synthetic plant
+    generateSurrogatePlant(param_file)
+    # Read the synthetic plant's endpoints and branchpoints for the latest run
+    syn_bp, syn_ep = read_syn_plant_surrogate()
+    # Use the first (or only) day's data for cost calculation
+    cost = 0
+    for i in range(min(len(syn_bp), len(real_bp))):
+        cost += calculate_cost(syn_bp[i], syn_ep[i], real_bp[i], real_ep[i])
+    return cost
+
+def generateSurrogatePlant(param_file):
+        # setup call to lpfg
+        # lpfg_command = "lpfg -w 306 256 lsystem.l view.v materials.mat -a anim.a contours.cset functions.fset functions.tset loop_parameters.vset > log.txt"
+        lpfg_command = f"lpfg -w 306 256 lsystem.l view.v materials.mat contours.cset functions.fset functions.tset {param_file} > surrogate/lpfg_log.txt"
+
+        if not os.path.exists("project"):
+            os.system("g++ -o project -Wall -Wextra project.cpp -lm")
+            
+        if not os.path.exists("surrogate"):
+            os.mkdir("surrogate")
+
+        # run lpfg  
+        process = subprocess.Popen(['bash', '-c', lpfg_command])
+        process.wait()
+        os.system(f"./project 2454 2056 leafposition.dat > surrogate/output.txt")
+        shutil.move("leafposition.dat", f"./surrogate")
+        
+def read_syn_plant_surrogate(file_name="surrogate/output.txt"):
+    f = open(file_name, "r")
+    lines = f.readlines()
+    day_temp = 0
+    syn_bp = []
+    syn_ep = []
+    syn_bp_day = []
+    syn_ep_day = []
+    day = []
+
+    for line in lines:
+        temp = line.split(" ")
+        if temp[0] == "Day:":
+            day_temp = int(temp[1])
+            if day_temp>2:
+                syn_bp.append(syn_bp_day)
+                syn_ep.append(syn_ep_day)
+                syn_bp_day = []
+                syn_ep_day = []
+        if (temp[0] != "Day:") & (day_temp > 1):
+            if temp[0] == "I":
+                syn_bp_day.append([int(temp[3]), int(temp[2])])
+                day.append(day_temp)
+            else:
+                syn_ep_day.append([int(temp[3]), int(temp[2])])
+                day.append(day_temp)
+
+    if day_temp == 27:
+        syn_bp.append(syn_bp_day)
+        syn_ep.append(syn_ep_day)
+
+    f.close()
+
+    return syn_bp, syn_ep
