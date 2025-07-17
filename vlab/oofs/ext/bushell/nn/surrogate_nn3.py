@@ -8,7 +8,7 @@ import shutil
 import csv
 import numpy as np
 from plant_comparison_nn import read_real_plants
-from utils_nn import build_random_parameter_file, generate_and_evaluate
+from utils_nn import build_parameter_file, build_random_parameter_file, generate_and_evaluate
 
 accuracy_threshold = 0.01
 
@@ -66,10 +66,10 @@ if __name__ == "__main__":
     else:
         num_runs = 1000
 
-    batch_size = 16  # You can adjust this
+    batch_size = 32  # You can adjust this
 
     # Read csv file
-    model_name = "batch_plant_surrogate_model.pt"
+    model_name = "boundary_batch_plant_surrogate_model.pt"
     csv_file = model_name + ".csv"
     if os.path.exists(csv_file):
         with open(csv_file, "r") as f:
@@ -113,6 +113,7 @@ if __name__ == "__main__":
     rel_error_history = []
 
     start_time = time.time()
+    boundary_toggle = True  # Added to alternate boundary test extremes
 
     params_batch = []
     true_costs_batch = []
@@ -121,8 +122,18 @@ if __name__ == "__main__":
     for idx in range(num_runs):
         sample_start_time = time.time()  # Start timing the current sample
         clear_surrogate_dir()
-        # 1. Generate random parameters and write to file
-        params = build_random_parameter_file("surrogate_params.vset")
+        # 1. Generate parameters, 1/3 as boundary tests
+        if idx % 3 == 0:
+            if boundary_toggle:
+                params = list(param_mean - param_std)  # lower boundary test
+                boundary_toggle = False
+            else:
+                params = list(param_mean + param_std)  # upper boundary test
+                boundary_toggle = True
+            # Write boundary test parameters to file for consistency
+            build_parameter_file("surrogate_params.vset", params)
+        else:
+            params = build_random_parameter_file("surrogate_params.vset")
         params_batch.append(params)
         # 2. Get true cost from L-system
         true_cost = generate_and_evaluate("surrogate_params.vset", real_bp, real_ep)
@@ -178,7 +189,13 @@ if __name__ == "__main__":
 
         if samples_left > 0:
             eta = samples_left * avg_time_per_sample
-            eta_str = time.strftime('%H:%M:%S', time.gmtime(eta))
+            days = int(eta // 86400)
+            seconds_rem = eta % 86400
+            time_str = time.strftime('%H:%M:%S', time.gmtime(seconds_rem))
+            if days > 0:
+                eta_str = f"{days}d {time_str}"
+            else:
+                eta_str = time_str
         else:
             eta_str = "00:00:00"  # finished
         
