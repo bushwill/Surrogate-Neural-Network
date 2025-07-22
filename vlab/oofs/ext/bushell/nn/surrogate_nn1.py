@@ -28,10 +28,13 @@ class PlantSurrogateNet(nn.Module):
 
 def clear_surrogate_dir():
     folder = "surrogate"
-    for filename in os.listdir(folder):
-        file_path = os.path.join(folder, filename)
-        if os.path.isfile(file_path):
-            os.remove(file_path)
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    else:
+        for filename in os.listdir(folder):
+            file_path = os.path.join(folder, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
             
 if __name__ == "__main__":
     import time
@@ -47,7 +50,8 @@ if __name__ == "__main__":
         num_runs = 1000
 
     # Read csv file
-    csv_file = "surrogate_training_data.csv"
+    model_name = "plant_surrogate_model.pt"
+    csv_file = model_name + ".csv"
     if os.path.exists(csv_file):
         with open(csv_file, "r") as f:
             reader = csv.reader(f)
@@ -69,17 +73,17 @@ if __name__ == "__main__":
         if write_header:
             writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "loss", "pred_cost", "true_cost"] + [f"param_{i}" for i in range(13)])
             
-    model_path = "plant_surrogate_model.pt"
+    model_name = "plant_surrogate_model.pt"
     model = PlantSurrogateNet()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.MSELoss()
 
     # Always load if exists, but always train
-    if os.path.exists(model_path):
-        model.load_state_dict(torch.load(model_path))
-        print(f"Loaded existing model from {model_path}")
+    if os.path.exists(model_name):
+        model.load_state_dict(torch.load(model_name))
+        print(f"Loaded existing model from {model_name}")
     else:
-        print(f"No existing model found at {model_path}, creating new model.")
+        print(f"No existing model found at {model_name}, creating new model.")
     model.train()
     print("Reading real plants...")
     real_bp, real_ep = read_real_plants()
@@ -154,5 +158,6 @@ if __name__ == "__main__":
                 [f"{p:.4f}" for p in params]
             )
     print()  # Newline after progress bar
-    torch.save(model.state_dict(), model_path)
-    print(f"Trained and saved new model to {model_path}")
+    torch.save(model.state_dict(), model_name)
+    print(f"Trained and saved new model to {model_name}")
+    print(f"Total samples: {total_samples}, Total loss: {total_loss:.4f}, Average loss: {avg_loss:.4f}")

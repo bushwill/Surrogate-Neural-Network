@@ -73,9 +73,13 @@ if __name__ == "__main__":
         else:
             print(f"Starting optimizer network from scratch (restart {restart+1}/{num_restarts}).")
 
-        optimizer = torch.optim.Adam(optimizer_net.parameters(), lr=1e-2)
+        # Set consistent optimizer and scheduler settings:
+        optimizer = torch.optim.Adam(optimizer_net.parameters(), lr=1e-2, weight_decay=1e-5)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.5)
-
+        
+        # Use a consistent parameter noise standard deviation:
+        param_noise_std = 0.02
+        
         # Get number of epochs from command line argument, default to 5000
         if len(sys.argv) > 1:
             try:
@@ -86,29 +90,26 @@ if __name__ == "__main__":
         else:
             num_epochs = 5000
 
-        param_noise_std = 0.05  # Standard deviation of parameter noise
+        batch_size = 32  # Should be consistent with others
+        # Compute total number of samples as epochs*batch_size
+        num_runs = num_epochs * batch_size
 
-        for step in range(num_epochs):
+        for step in range(num_runs):
             optimizer.zero_grad()
-            batch_size = 32
             noise = torch.rand(batch_size, 1)
             params = optimizer_net(noise)
-            # Add parameter noise to help escape local minima
+            # Add parameter noise and clamp within param_min and param_max
             params_noisy = params + torch.randn_like(params) * param_noise_std
-            # Clamp to valid range
             params_noisy = torch.max(torch.min(params_noisy, param_max), param_min)
             pred_cost = surrogate(params_noisy)
-            # Main loss: mean surrogate cost
             loss = pred_cost.mean()
-            # Diversity loss: negative variance of parameters (encourage spread)
             diversity_loss = -params_noisy.var(dim=0).mean()
-            # Combine losses (lambda controls strength of diversity)
-            total_loss = loss + diversity_amount * diversity_loss  # You can tune 0.01
+            total_loss = loss + diversity_amount * diversity_loss
             total_loss.backward()
             optimizer.step()
             scheduler.step()
-            if step % max(1, num_epochs // 100) == 0 or step == num_epochs - 1:
-                percent = 100 * (step + 1) / num_epochs
+            if step % max(1, num_runs // 100) == 0 or step == num_runs - 1:
+                percent = 100 * (step + 1) / num_runs
                 sys.stdout.write(f"\rRestart {restart+1}/{num_restarts} - Progress: {percent:.1f}% - surrogate cost={pred_cost.mean().item():.4f}")
                 sys.stdout.flush()
 

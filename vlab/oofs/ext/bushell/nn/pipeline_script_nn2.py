@@ -65,6 +65,20 @@ if __name__ == "__main__":
     best_cost = float('inf')
     best_params = None
 
+    # Get number of epochs from command line argument, default to 5000
+    if len(sys.argv) > 1:
+        try:
+            num_epochs = int(sys.argv[1])
+        except ValueError:
+            print("Invalid argument for number of epochs, using default 5000.")
+            num_epochs = 5000
+    else:
+        num_epochs = 5000
+
+    batch_size = 32  # Already defined earlier
+    # Compute total number of samples = num_epochs * batch_size
+    num_runs = num_epochs * batch_size
+
     for restart in range(num_restarts):
         optimizer_net = OptimizerNet(input_dim=1, output_dim=13)
         if os.path.exists(optimizer_model_path) and restart == 0:
@@ -73,43 +87,31 @@ if __name__ == "__main__":
         else:
             print(f"Starting optimizer network from scratch (restart {restart+1}/{num_restarts}).")
 
-        optimizer = torch.optim.Adam(optimizer_net.parameters(), lr=1e-2)
+        # Use consistent optimizer settings: lr=1e-2 and weight_decay=1e-5
+        optimizer = torch.optim.Adam(optimizer_net.parameters(), lr=1e-2, weight_decay=1e-5)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.5)
-
-        # Get number of epochs from command line argument, default to 5000
-        if len(sys.argv) > 1:
-            try:
-                num_epochs = int(sys.argv[1])
-            except ValueError:
-                print("Invalid argument for number of epochs, using default 5000.")
-                num_epochs = 5000
-        else:
-            num_epochs = 5000
-
-        param_noise_std = 0.05  # Standard deviation of parameter noise
-
-        for step in range(num_epochs):
+        
+        # Get number of epochs as before; and use the same noise level:
+        param_noise_std = 0.02  # same as pipeline_script_nn3
+        
+        for idx in range(num_runs):
             optimizer.zero_grad()
-            batch_size = 32
             noise = torch.rand(batch_size, 1)
             params = optimizer_net(noise)
-            # Add parameter noise to help escape local minima
+            # Add parameter noise and clamp to valid range
             params_noisy = params + torch.randn_like(params) * param_noise_std
-            # Clamp to valid range
             params_noisy = torch.max(torch.min(params_noisy, param_max), param_min)
             pred_cost = surrogate(params_noisy)
-            # Main loss: mean surrogate cost
             loss = pred_cost.mean()
-            # Diversity loss: negative variance of parameters (encourage spread)
             diversity_loss = -params_noisy.var(dim=0).mean()
-            # Combine losses (lambda controls strength of diversity)
-            total_loss = loss + diversity_amount * diversity_loss  # You can tune 0.01
+            total_loss = loss + diversity_amount * diversity_loss
             total_loss.backward()
             optimizer.step()
             scheduler.step()
-            if step % max(1, num_epochs // 100) == 0 or step == num_epochs - 1:
-                percent = 100 * (step + 1) / num_epochs
-                sys.stdout.write(f"\rRestart {restart+1}/{num_restarts} - Progress: {percent:.1f}% - surrogate cost={pred_cost.mean().item():.4f}")
+            if idx % max(1, num_runs // 100) == 0 or idx == num_runs - 1:
+                percent = 100 * (idx + 1) / num_runs
+                denorm_cost = denormalize(pred_cost.mean().detach().item(), cost_mean, cost_std)
+                sys.stdout.write(f"\rRestart {restart+1}/{num_restarts} - Progress: {percent:.1f}% - surrogate cost (denormalized)= {denorm_cost:.4f}")
                 sys.stdout.flush()
 
         # After training, get the optimized plant parameters for this restart

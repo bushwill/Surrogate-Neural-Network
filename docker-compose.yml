@@ -2,11 +2,29 @@ version: "3.9"
 
 services:
   app1:
-    container_name: vlab_nn_surrogate
+    container_name: vlab_nn_surrogate1
     build:
       context: .
       dockerfile: Dockerfile
     image: wb_vlab_nn_surrogate:latest
     command: tail -f /dev/null
     ports:
-      - "6080:6080"
+      - "6081:6080"
+  app2:
+    container_name: vlab_nn_surrogate2
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6082:6080"
+  app3:
+    container_name: vlab_nn_surrogate3
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6083:6080"

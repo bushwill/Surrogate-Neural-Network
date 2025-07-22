@@ -12,19 +12,27 @@ from utils_nn import build_parameter_file, build_random_parameter_file, generate
 
 accuracy_threshold = 0.01
 
-# Default statistics for normalization (replace with your own if needed)
-param_mean = np.array([
-    9.88270607, 2.9858148, 1.61202144, -0.26396205, 135.48622668,
-    5.13301503, 0.49941818, 0.99277462, 90.09817002, 180.16946128,
-    0.70191325, 0.89834544, 0.49940136
-])
-param_std = np.array([
-    1.08647035, 0.091338525, 91.2438917, 4.20708716, 4.97262854,
-    1.04900474, 0.00917093112, 0.100055085, 3.00745595, 3.04930688,
-    0.0509022923, 0.0106940044, 0.0100063813
-])
-cost_mean = 65403.89308560747
-cost_std = 7702.132079934675
+# Remove the hard-coded defaults and create a function to compute stats from lpfg outputs:
+def compute_normalization_stats(num_samples, real_bp, real_ep):
+    params_collection = []
+    cost_collection = []
+    temp_file = "surrogate_params_temp.vset"
+    for i in range(num_samples):
+        clear_surrogate_dir()
+        p = build_random_parameter_file(temp_file)
+        c = generate_and_evaluate(temp_file, real_bp, real_ep)
+        if np.isfinite(c) and c >= 0:
+            params_collection.append(p)
+            cost_collection.append(c)
+    return (np.mean(params_collection, axis=0), np.std(params_collection, axis=0),
+            np.mean(cost_collection), np.std(cost_collection))
+
+# Remove the previously defined normalization constants:
+# param_mean, param_std, cost_mean, cost_std remain as placeholders until computed
+param_mean = None
+param_std = None
+cost_mean = None
+cost_std = None
 
 def normalize(x, mean, std):
     return (np.array(x) - mean) / (std + 1e-8)
@@ -47,7 +55,9 @@ class PlantSurrogateNet(nn.Module):
 
 def clear_surrogate_dir():
     folder = "surrogate"
-    if os.path.exists(folder):
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    else:
         for filename in os.listdir(folder):
             file_path = os.path.join(folder, filename)
             if os.path.isfile(file_path):
@@ -55,6 +65,7 @@ def clear_surrogate_dir():
             
 if __name__ == "__main__":
     import time
+    clear_surrogate_dir()
     
     # Get number of runs from command line, default to 1000
     if len(sys.argv) > 1:
@@ -105,6 +116,19 @@ if __name__ == "__main__":
     model.train()
     print("Reading real plants...")
     real_bp, real_ep = read_real_plants()
+    print("Computing normalization statistics from lpfg outputs...")
+    num_samples = 100  # adjust as needed
+    computed_param_mean, computed_param_std, computed_cost_mean, computed_cost_std = compute_normalization_stats(num_samples, real_bp, real_ep)
+    print(f"Computed param_mean: {computed_param_mean}")
+    print(f"Computed param_std: {computed_param_std}")
+    print(f"Computed cost_mean: {computed_cost_mean}")
+    print(f"Computed cost_std: {computed_cost_std}")
+    # Set normalization parameters for subsequent training:
+    param_mean = computed_param_mean
+    param_std = computed_param_std
+    cost_mean = computed_cost_mean
+    cost_std = computed_cost_std
+
     print(f"Starting training with {num_runs} plants...")
     
     total_loss = sum(prev_losses)
@@ -152,6 +176,8 @@ if __name__ == "__main__":
 
         # Predict cost and calculate loss for the current sample
         pred_cost_tensor = model(params_tensor)
+        # Denormalize the prediction (convert to original cost scale)
+        denorm_pred_cost = denormalize(pred_cost_tensor.detach().squeeze().numpy(), cost_mean, cost_std)
         loss = loss_fn(pred_cost_tensor, true_cost_tensor)
 
         # Denormalize prediction for reporting
@@ -214,11 +240,6 @@ if __name__ == "__main__":
                 [overall_sample, timestamp, f"{avg_loss:.4f}", f"{avg_loss_change:.4f}", f"{loss.item():.4f}", f"{pred_cost_val:.4f}", f"{true_cost:.4f}"] +
                 [f"{p:.4f}" for p in params]
             )
-
-        # Add the current sample to the batch for training
-        if len(params_batch) < batch_size:
-            params_batch.append(params)
-            true_costs_batch.append(true_cost)
 
         # If the batch is full, update the model
         if len(params_batch) == batch_size or idx == num_runs - 1:
