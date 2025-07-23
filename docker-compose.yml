@@ -28,3 +28,21 @@ services:
     command: tail -f /dev/null
     ports:
       - "6083:6080"
+  app4:
+    container_name: vlab_nn_surrogate4
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6084:6080"
+  app5:
+    container_name: vlab_nn_surrogate5
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6085:6080"

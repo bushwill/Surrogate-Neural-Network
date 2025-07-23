@@ -10,8 +10,8 @@ import numpy as np
 from plant_comparison_nn import read_real_plants
 from utils_nn import build_random_parameter_file, generate_and_evaluate
 
+model_name = "simple_plant_surrogate_model.pt"
 accuracy_threshold = 0.01
-
 
 class PlantSurrogateNet(nn.Module):
     def __init__(self, input_dim=13, output_dim=1):
@@ -50,7 +50,6 @@ if __name__ == "__main__":
         num_runs = 1000
 
     # Read csv file
-    model_name = "plant_surrogate_model.pt"
     csv_file = model_name + ".csv"
     if os.path.exists(csv_file):
         with open(csv_file, "r") as f:
@@ -73,7 +72,6 @@ if __name__ == "__main__":
         if write_header:
             writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "loss", "pred_cost", "true_cost"] + [f"param_{i}" for i in range(13)])
             
-    model_name = "plant_surrogate_model.pt"
     model = PlantSurrogateNet()
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
     loss_fn = nn.MSELoss()

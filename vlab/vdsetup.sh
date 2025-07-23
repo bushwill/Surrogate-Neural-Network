@@ -15,7 +15,7 @@ sudo git clone https://github.com/novnc/noVNC.git /opt/noVNC
 ln -s /usr/lib/x86_64-linux-gnu/libglut.so.3.12 /usr/lib/x86_64-linux-gnu/libglut.so.3
 
 # Initialize virtual display for vlab
-Xvfb :99 -screen 0 1024x768x24 2>/dev/null &
+Xvfb :99 -screen 0 1280x1024x24 2>/dev/null &
 # Start x11vnc server
 x11vnc -ncache 10 -display :99 -rfbport 6079 -forever -shared -bg
 # Start noVNC server

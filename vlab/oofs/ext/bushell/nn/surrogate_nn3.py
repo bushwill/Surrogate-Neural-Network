@@ -8,11 +8,13 @@ import shutil
 import csv
 import numpy as np
 from plant_comparison_nn import read_real_plants
-from utils_nn import build_parameter_file, build_random_parameter_file, generate_and_evaluate
+from utils_nn import build_random_parameter_file, generate_and_evaluate
 
+model_name = "batch_32_plant_surrogate_model.pt"
 accuracy_threshold = 0.01
+batch_size = 32
 
-# Remove the hard-coded defaults and create a function to compute stats from lpfg outputs:
+# Remove the hard-coded normalization constants and add a helper function:
 def compute_normalization_stats(num_samples, real_bp, real_ep):
     params_collection = []
     cost_collection = []
@@ -27,8 +29,12 @@ def compute_normalization_stats(num_samples, real_bp, real_ep):
     return (np.mean(params_collection, axis=0), np.std(params_collection, axis=0),
             np.mean(cost_collection), np.std(cost_collection))
 
-# Remove the previously defined normalization constants:
-# param_mean, param_std, cost_mean, cost_std remain as placeholders until computed
+# Remove default normalization values:
+# param_mean = np.array([...])
+# param_std  = np.array([...])
+# cost_mean = 65403.89308560747
+# cost_std  = 7702.132079934675
+
 param_mean = None
 param_std = None
 cost_mean = None
@@ -77,10 +83,7 @@ if __name__ == "__main__":
     else:
         num_runs = 1000
 
-    batch_size = 32  # You can adjust this
-
     # Read csv file
-    model_name = "boundary_batch_plant_surrogate_model.pt"
     csv_file = model_name + ".csv"
     if os.path.exists(csv_file):
         with open(csv_file, "r") as f:
@@ -117,18 +120,19 @@ if __name__ == "__main__":
     print("Reading real plants...")
     real_bp, real_ep = read_real_plants()
     print("Computing normalization statistics from lpfg outputs...")
-    num_samples = 100  # adjust as needed
+    num_samples = 100  # adjust as needed for a robust estimate
     computed_param_mean, computed_param_std, computed_cost_mean, computed_cost_std = compute_normalization_stats(num_samples, real_bp, real_ep)
     print(f"Computed param_mean: {computed_param_mean}")
     print(f"Computed param_std: {computed_param_std}")
     print(f"Computed cost_mean: {computed_cost_mean}")
     print(f"Computed cost_std: {computed_cost_std}")
-    # Set normalization parameters for subsequent training:
+
+    # Set the computed normalization parameters for subsequent training
     param_mean = computed_param_mean
     param_std = computed_param_std
     cost_mean = computed_cost_mean
     cost_std = computed_cost_std
-
+    
     print(f"Starting training with {num_runs} plants...")
     
     total_loss = sum(prev_losses)
@@ -137,7 +141,6 @@ if __name__ == "__main__":
     rel_error_history = []
 
     start_time = time.time()
-    boundary_toggle = True  # Added to alternate boundary test extremes
 
     params_batch = []
     true_costs_batch = []
@@ -146,18 +149,8 @@ if __name__ == "__main__":
     for idx in range(num_runs):
         sample_start_time = time.time()  # Start timing the current sample
         clear_surrogate_dir()
-        # 1. Generate parameters, 1/3 as boundary tests
-        if idx % 3 == 0:
-            if boundary_toggle:
-                params = list(param_mean - param_std)  # lower boundary test
-                boundary_toggle = False
-            else:
-                params = list(param_mean + param_std)  # upper boundary test
-                boundary_toggle = True
-            # Write boundary test parameters to file for consistency
-            build_parameter_file("surrogate_params.vset", params)
-        else:
-            params = build_random_parameter_file("surrogate_params.vset")
+        # 1. Generate random parameters and write to file
+        params = build_random_parameter_file("surrogate_params.vset")
         params_batch.append(params)
         # 2. Get true cost from L-system
         true_cost = generate_and_evaluate("surrogate_params.vset", real_bp, real_ep)
@@ -176,8 +169,6 @@ if __name__ == "__main__":
 
         # Predict cost and calculate loss for the current sample
         pred_cost_tensor = model(params_tensor)
-        # Denormalize the prediction (convert to original cost scale)
-        denorm_pred_cost = denormalize(pred_cost_tensor.detach().squeeze().numpy(), cost_mean, cost_std)
         loss = loss_fn(pred_cost_tensor, true_cost_tensor)
 
         # Denormalize prediction for reporting
@@ -215,13 +206,7 @@ if __name__ == "__main__":
 
         if samples_left > 0:
             eta = samples_left * avg_time_per_sample
-            days = int(eta // 86400)
-            seconds_rem = eta % 86400
-            time_str = time.strftime('%H:%M:%S', time.gmtime(seconds_rem))
-            if days > 0:
-                eta_str = f"{days}d {time_str}"
-            else:
-                eta_str = time_str
+            eta_str = time.strftime('%H:%M:%S', time.gmtime(eta))
         else:
             eta_str = "00:00:00"  # finished
         
@@ -240,6 +225,11 @@ if __name__ == "__main__":
                 [overall_sample, timestamp, f"{avg_loss:.4f}", f"{avg_loss_change:.4f}", f"{loss.item():.4f}", f"{pred_cost_val:.4f}", f"{true_cost:.4f}"] +
                 [f"{p:.4f}" for p in params]
             )
+
+        # Add the current sample to the batch for training
+        if len(params_batch) < batch_size:
+            params_batch.append(params)
+            true_costs_batch.append(true_cost)
 
         # If the batch is full, update the model
         if len(params_batch) == batch_size or idx == num_runs - 1:
