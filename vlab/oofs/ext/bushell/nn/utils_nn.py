@@ -5,6 +5,19 @@ import subprocess
 import shutil
 from plant_comparison_nn import calculate_cost, read_real_plants
 
+def get_normalization_stats():
+    """
+    Returns normalization statistics for the surrogate model.
+    Adjust these values according to your dataset.
+    For inputs (dimension 13) and a scalar output.
+    """
+    import torch
+    input_mean = torch.zeros(13)
+    input_std = torch.ones(13)
+    output_mean = torch.tensor(0.0)
+    output_std = torch.tensor(1.0)
+    return input_mean, input_std, output_mean, output_std
+
 def generate_plant(param_file, output_dir):
     """
     Generate a plant using lpfg and save results in output_dir.
