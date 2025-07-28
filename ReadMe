@@ -6,7 +6,7 @@ Local env requirements:
 docker-compose up --force-recreate --build -d
 
 // Step 2: To attach to container and start a bash shell: //
-docker exec -it vlab_nn_surrogate bash
+docker exec -it instance1 bash
 
 // Step 3: Once attached, run the following to install vlab: //
 . ./setup.sh (once the default config file is being copied, press 'enter' key to finalize)

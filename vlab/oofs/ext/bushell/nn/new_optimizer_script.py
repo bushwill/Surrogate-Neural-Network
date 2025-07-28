@@ -25,7 +25,11 @@ accuracy_threshold = 0.01
 boundary_penalty_weight = 0.1   # New: weight for soft boundary penalty
 
 surrogate_models = [
-    "simple_plant_surrogate_model.pt"
+    "simple_plant_surrogate_model.pt",
+    "batch_16_plant_surrogate_model.pt",
+    "batch_32_plant_surrogate_model.pt",
+    "boundary_batch_16_plant_surrogate_model.pt",
+    "boundary_batch_32_plant_surrogate_model.pt",
 ]
 
 class OptimizerNet(nn.Module):

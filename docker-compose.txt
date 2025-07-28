@@ -1,0 +1,36 @@
+  app2:
+    container_name: instance2
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6081:6080"
+  app3:
+    container_name: instance3
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6082:6080"
+  app4:
+    container_name: instance4
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6083:6080"
+  app5:
+    container_name: instance5
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6084:6080"

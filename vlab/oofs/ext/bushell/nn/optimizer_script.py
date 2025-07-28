@@ -25,10 +25,9 @@ accuracy_threshold = 0.01
 
 surrogate_models = [
     "simple_plant_surrogate_model.pt",
-    "batch_16_plant_surrogate_model.pt",
-    "batch_32_plant_surrogate_model.pt",
-    "boundary_batch_16_plant_surrogate_model.pt",
-    "boundary_batch_32_plant_surrogate_model.pt"
+    "normal_plant_surrogate_model.pt",
+    "normal_batch_16_plant_surrogate_model.pt",
+    "normal_batch_32_plant_surrogate_model.pt"
 ]
 
 class OptimizerNet(nn.Module):

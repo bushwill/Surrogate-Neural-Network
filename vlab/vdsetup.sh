@@ -17,8 +17,13 @@ ln -s /usr/lib/x86_64-linux-gnu/libglut.so.3.12 /usr/lib/x86_64-linux-gnu/libglu
 # Initialize virtual display for vlab
 Xvfb :99 -screen 0 1280x1024x24 2>/dev/null &
 # Start x11vnc server
-x11vnc -ncache 10 -display :99 -rfbport 6079 -forever -shared -bg
+x11vnc -display :99 -rfbport 6079 -forever -shared -bg
 # Start noVNC server
+cat > /opt/noVNC/defaults.json << EOF
+{
+    "resize": "scale",
+}
+EOF
 /opt/noVNC/utils/novnc_proxy --vnc localhost:6079 --listen 6080 &
 # Create a symbolic link for noVNC HTML file
 ln -sf /opt/noVNC/vnc.html /opt/noVNC/index.html
