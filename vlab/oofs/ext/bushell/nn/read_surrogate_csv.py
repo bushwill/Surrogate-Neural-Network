@@ -45,8 +45,37 @@ def process_csv_file(csv_file, batch_size=1000):
     
     return batch_errors
 
+def calculate_last_1000_rel_error(csv_file):
+    """Calculate average relative error percentage for the last 1000 samples in a CSV file"""
+    rel_errors = []
+    
+    if not os.path.exists(csv_file):
+        print(f"Warning: {csv_file} not found, skipping...")
+        return None
+    
+    with open(csv_file, "r") as f:
+        reader = csv.DictReader(f)
+        all_rows = list(reader)
+        
+        # Get last 1000 rows (or all if less than 1000)
+        last_rows = all_rows[-1000:] if len(all_rows) >= 1000 else all_rows
+        
+        for row in last_rows:
+            try:
+                pred = float(row["pred_cost"])
+                true = float(row["true_cost"])
+                if true != 0:
+                    rel_error = abs(pred - true) / abs(true)
+                    rel_errors.append(rel_error)
+            except Exception:
+                continue
+    
+    if rel_errors:
+        return (sum(rel_errors) / len(rel_errors)) * 100  # Convert to percentage
+    return None
+
 # Process all CSV files
-batch_size = 1000
+batch_size = 100
 plt.figure(figsize=(12, 6))
 
 for i, csv_file in enumerate(csv_files):
@@ -73,3 +102,15 @@ plt.grid(True, alpha=0.3)
 plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 plt.tight_layout()
 plt.show()
+
+# Calculate and print relative error percentage for last 1000 samples
+print("Average Relative Error Percentage (Last 1000 samples):")
+print("-" * 50)
+for csv_file in csv_files:
+    rel_error_pct = calculate_last_1000_rel_error(csv_file)
+    if rel_error_pct is not None:
+        model_name = csv_file.replace('.pt.csv', '').replace('_', ' ').title()
+        print(f"{model_name}: {rel_error_pct:.2f}%")
+    else:
+        print(f"{csv_file}: No data available")
+print("-" * 50)
