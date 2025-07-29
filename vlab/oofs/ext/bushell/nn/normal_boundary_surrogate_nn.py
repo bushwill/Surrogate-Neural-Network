@@ -11,7 +11,7 @@ import csv
 from plant_comparison_nn import read_real_plants
 from utils_nn import build_random_parameter_file, generate_and_evaluate, get_normalization_stats
 
-model_name = "normal_plant_surrogate_model.pt"
+model_name = "normal_boundary_plant_surrogate_model.pt"
 accuracy_threshold = 0.01
 
 class PlantSurrogateNet(nn.Module):

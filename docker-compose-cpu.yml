@@ -1,0 +1,113 @@
+version: "3.9"
+
+services:
+  app1:
+    container_name: instance1
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6080:6080"
+    # CPU-optimized resource allocation
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'     # Allow exactly 2 CPU cores per container
+          memory: 10G     # Limit to 10GB RAM per container
+        reservations:
+          cpus: '2.0'     # Reserve exactly 2 CPU cores
+          memory: 6G      # Reserve at least 6GB RAM
+    # CPU performance environment variables
+    environment:
+      - OMP_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+      - OPENBLAS_NUM_THREADS=2
+      - VECLIB_MAXIMUM_THREADS=2
+      - NUMEXPR_NUM_THREADS=2
+      - PYTORCH_NUM_THREADS=2
+    # Shared memory for PyTorch data loading
+    shm_size: 2gb
+    # CPU affinity and performance settings
+    cap_add:
+      - SYS_NICE
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    # CPU affinity (bind to specific cores)
+    cpuset: "0-1"
+      
+  app2:
+    container_name: instance2
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6081:6080"
+    # CPU-optimized resource allocation
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'     # Allow exactly 2 CPU cores per container
+          memory: 10G     # Limit to 10GB RAM per container
+        reservations:
+          cpus: '2.0'     # Reserve exactly 2 CPU cores
+          memory: 6G      # Reserve at least 6GB RAM
+    # CPU performance environment variables
+    environment:
+      - OMP_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+      - OPENBLAS_NUM_THREADS=2
+      - VECLIB_MAXIMUM_THREADS=2
+      - NUMEXPR_NUM_THREADS=2
+      - PYTORCH_NUM_THREADS=2
+    # Shared memory for PyTorch data loading
+    shm_size: 2gb
+    # CPU affinity and performance settings
+    cap_add:
+      - SYS_NICE
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    # CPU affinity (bind to different cores to avoid contention)
+    cpuset: "2-3"
+      
+  app3:
+    container_name: instance3
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wb_vlab_nn_surrogate:latest
+    command: tail -f /dev/null
+    ports:
+      - "6082:6080"
+    # CPU-optimized resource allocation
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'     # Allow exactly 2 CPU cores per container
+          memory: 10G     # Limit to 10GB RAM per container
+        reservations:
+          cpus: '2.0'     # Reserve exactly 2 CPU cores
+          memory: 6G      # Reserve at least 6GB RAM
+    # CPU performance environment variables
+    environment:
+      - OMP_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+      - OPENBLAS_NUM_THREADS=2
+      - VECLIB_MAXIMUM_THREADS=2
+      - NUMEXPR_NUM_THREADS=2
+      - PYTORCH_NUM_THREADS=2
+    # Shared memory for PyTorch data loading
+    shm_size: 2gb
+    # CPU affinity and performance settings
+    cap_add:
+      - SYS_NICE
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    # CPU affinity (bind to remaining cores)
+    cpuset: "4-5"

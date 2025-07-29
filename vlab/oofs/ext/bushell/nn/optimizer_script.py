@@ -23,12 +23,16 @@ batch_size = 16
 diversity_amount = 0.1
 accuracy_threshold = 0.01
 
+directory = "Run 3 Data/"
+
 surrogate_models = [
-    "simple_plant_surrogate_model.pt",
     "normal_plant_surrogate_model.pt",
-    "normal_batch_16_plant_surrogate_model.pt",
-    "normal_batch_32_plant_surrogate_model.pt"
+    "normal_boundary_plant_surrogate_model.pt",
+    "normal_hier_plant_surrogate_model.pt"
 ]
+
+for i in range(len(surrogate_models)):
+    surrogate_models[i] = directory + surrogate_models[i]
 
 class OptimizerNet(nn.Module):
     def __init__(self, input_dim=1, output_dim=13):
