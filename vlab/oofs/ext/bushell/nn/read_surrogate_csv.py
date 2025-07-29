@@ -3,12 +3,15 @@ import matplotlib.pyplot as plt
 import os
 
 # List of CSV files to analyze
+directory = "Run 3 Data/"
+
 csv_files = [
-    "simple_plant_surrogate_model.pt.csv",
     "normal_plant_surrogate_model.pt.csv", 
-    "normal_batch_16_plant_surrogate_model.pt.csv",
-    "normal_batch_32_plant_surrogate_model.pt.csv"
+    "normal_boundary_plant_surrogate_model.pt.csv",
+    "normal_hier_plant_surrogate_model.pt.csv"
 ]
+
+csv_files = [os.path.join(directory, file) for file in csv_files]
 
 # Define colors for each line
 colors = ['blue', 'red', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'olive', 'cyan']
