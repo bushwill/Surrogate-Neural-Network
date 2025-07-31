@@ -28,6 +28,7 @@ def read_surrogate_csv(csv_file):
         reader = csv.reader(f)
         header = next(reader)  # Skip header
         print(f"CSV header: {header}")  # Debug: show header structure
+        print(f"Header length: {len(header)}")  # Debug: show number of columns
         
         for row in reader:
             try:
@@ -35,14 +36,16 @@ def read_surrogate_csv(csv_file):
                 data['timestamps'].append(row[1])
                 data['avg_losses'].append(float(row[2]))
                 data['avg_loss_changes'].append(float(row[3]))
-                data['losses'].append(float(row[4]))
+                
                 # Check the CSV header structure - costs might be in different columns
                 if len(row) >= 10:  # New format with hierarchical loss components
+                    data['losses'].append(float(row[5]))  # Use cost_loss instead of total_loss
                     data['pred_costs'].append(float(row[8]))  # pred_cost column
                     data['true_costs'].append(float(row[9]))  # true_cost column
                     # Parameters (columns 10 onwards)
                     params = [float(row[i]) for i in range(10, min(23, len(row)))]
                 else:  # Old format
+                    data['losses'].append(float(row[4]))  # total_loss for old format
                     data['pred_costs'].append(float(row[5]))
                     data['true_costs'].append(float(row[6]))
                     # Parameters (columns 7-19)

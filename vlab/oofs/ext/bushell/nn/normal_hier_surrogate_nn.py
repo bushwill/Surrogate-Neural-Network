@@ -220,8 +220,8 @@ class HierarchicalPlantSurrogateNet(nn.Module):
         output_scale = self.output_std + 1e-8
         scaled_cost = final_cost * output_scale + self.output_mean
         
-        # Clamp to reasonable range based on typical true cost values (50k-100k range)
-        scaled_cost = torch.clamp(scaled_cost, min=40000.0, max=120000.0)
+        # Use softer clamping with wider range based on actual data range
+        scaled_cost = torch.clamp(scaled_cost, min=30000.0, max=150000.0)
         
         return scaled_cost
 
@@ -262,9 +262,9 @@ def hierarchical_loss_function(pred_cost, true_cost, bp_syn, bp_probs, ep_syn, e
     log_true = torch.log(torch.clamp(true_cost, min=1e-8))
     log_mse_loss = F.mse_loss(log_pred, log_true)
     
-    # Combine different loss components with adaptive weighting
+    # Combine different loss components with more balanced weighting
     rel_error_loss = torch.mean(relative_error)
-    cost_loss = 0.4 * rel_error_loss + 0.3 * huber_loss + 0.3 * log_mse_loss
+    cost_loss = 0.5 * rel_error_loss + 0.25 * huber_loss + 0.25 * log_mse_loss
     
     # Structure generation loss (encourage reasonable point distributions)
     structure_loss = 0.0
@@ -322,7 +322,7 @@ if __name__ == "__main__":
             prev_losses = []
             for row in existing_rows[1:]:
                 try:
-                    prev_losses.append(float(row[4]))  # Use loss column (index 4)
+                    prev_losses.append(float(row[5]))  # Use cost_loss column (index 5) for consistency
                 except Exception:
                     pass
     else:
@@ -335,14 +335,19 @@ if __name__ == "__main__":
             writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "total_loss", "cost_loss", "count_loss", "coord_reg", "pred_cost", "true_cost"] + [f"param_{i}" for i in range(13)])
             
     model = HierarchicalPlantSurrogateNet()
-    initial_lr = 3e-4  # Optimal learning rate based on current performance
-    optimizer = torch.optim.AdamW(model.parameters(), lr=initial_lr, weight_decay=1e-5)  # Use AdamW with weight decay
+    initial_lr = 2e-4  # Slightly lower initial learning rate for stability
+    optimizer = torch.optim.AdamW(model.parameters(), lr=initial_lr, weight_decay=1e-5)
     
-    # Adaptive learning rate parameters - more aggressive since model is working well
-    lr_decay_factor = 0.85  # More aggressive decay
-    lr_decay_threshold = 0.02  # Decay when relative error drops below 2%
-    lr_min = 5e-6  # Minimum learning rate
-    lr_patience = 50  # Check every 50 samples for adaptation
+    # Add learning rate scheduler for better convergence
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.8, patience=200, verbose=True, min_lr=1e-6
+    )
+    
+    # Adaptive learning rate parameters
+    lr_decay_factor = 0.85
+    lr_decay_threshold = 0.02
+    lr_min = 5e-6
+    lr_patience = 50
 
     # Always load if exists, but always train
     if os.path.exists(model_name):
@@ -435,6 +440,9 @@ if __name__ == "__main__":
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         
         optimizer.step()
+        
+        # Step the learning rate scheduler
+        scheduler.step(cost_loss.item())
         
         # 6. Update statistics
         total_loss += cost_loss.item()  # Track only cost loss for comparison
