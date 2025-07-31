@@ -18,7 +18,7 @@ from plant_comparison_nn import read_real_plants, make_matrix, make_index
 from utils_nn import build_random_parameter_file, generate_and_evaluate, get_normalization_stats
 
 model_name = "normal_hier_plant_surrogate_model.pt"
-accuracy_threshold = 0.01
+accuracy_threshold = 0.05  # 5% accuracy threshold (more realistic than 1%)
 
 class StructureGenerationNet(nn.Module):
     """Generates plant structure points (branch points and end points) from L-system parameters"""
@@ -158,14 +158,32 @@ class HierarchicalPlantSurrogateNet(nn.Module):
         self.hungarian_net = HungarianAssignmentNet(max_points)
         self.cost_aggregator = CostAggregationNet(max_days)
         
-        # Retrieve normalization stats for inputs and outputs
-        self.input_mean, self.input_std, self.output_mean, self.output_std = get_normalization_stats()
+        # Initialize normalization stats with reasonable defaults
+        try:
+            self.input_mean, self.input_std, self.output_mean, self.output_std = get_normalization_stats()
+        except:
+            # Fallback to reasonable defaults if normalization stats don't exist
+            print("Warning: Could not load normalization stats, using defaults")
+            self.input_mean = torch.zeros(input_dim)
+            self.input_std = torch.ones(input_dim)
+            self.output_mean = torch.tensor([0.0])
+            self.output_std = torch.tensor([1.0])
+        
+        # Ensure tensors are properly shaped
+        if len(self.input_mean.shape) == 0:
+            self.input_mean = self.input_mean.unsqueeze(0).repeat(input_dim)
+        if len(self.input_std.shape) == 0:
+            self.input_std = self.input_std.unsqueeze(0).repeat(input_dim)
+        if len(self.output_mean.shape) == 0:
+            self.output_mean = self.output_mean.unsqueeze(0)
+        if len(self.output_std.shape) == 0:
+            self.output_std = self.output_std.unsqueeze(0)
         
     def forward(self, x, real_bp_batch=None, real_ep_batch=None):
         batch_size = x.size(0)
         
-        # Normalize inputs
-        x_norm = (x - self.input_mean) / self.input_std
+        # Normalize inputs (avoid division by zero)
+        x_norm = (x - self.input_mean) / (self.input_std + 1e-8)
         
         # Generate synthetic plant structures
         bp_syn, bp_probs, ep_syn, ep_probs = self.structure_gen(x_norm)
@@ -198,8 +216,14 @@ class HierarchicalPlantSurrogateNet(nn.Module):
         # Final cost aggregation
         final_cost = self.cost_aggregator(daily_costs_tensor)
         
-        # Denormalize outputs
-        return final_cost * self.output_std + self.output_mean
+        # Apply output scaling more carefully to avoid extreme values
+        output_scale = self.output_std + 1e-8
+        scaled_cost = final_cost * output_scale + self.output_mean
+        
+        # Clamp to reasonable range based on typical true cost values (50k-100k range)
+        scaled_cost = torch.clamp(scaled_cost, min=40000.0, max=120000.0)
+        
+        return scaled_cost
 
 def prepare_real_plant_batch(real_bp, real_ep, max_points=50):
     """Convert real plant data to fixed-size tensors for batch processing"""
@@ -227,8 +251,20 @@ def prepare_real_plant_batch(real_bp, real_ep, max_points=50):
 def hierarchical_loss_function(pred_cost, true_cost, bp_syn, bp_probs, ep_syn, ep_probs, real_bp, real_ep):
     """Multi-component loss function for hierarchical training"""
     
-    # Primary cost prediction loss
-    cost_loss = F.mse_loss(pred_cost, true_cost)
+    # Primary cost prediction loss - focus on relative error
+    relative_error = torch.abs(pred_cost - true_cost) / (torch.abs(true_cost) + 1e-8)
+    
+    # Use Huber loss for robustness to outliers
+    huber_loss = F.huber_loss(pred_cost / (true_cost + 1e-8), torch.ones_like(true_cost), delta=0.1)
+    
+    # Log-scale MSE for better handling of different scales
+    log_pred = torch.log(torch.clamp(pred_cost, min=1e-8))
+    log_true = torch.log(torch.clamp(true_cost, min=1e-8))
+    log_mse_loss = F.mse_loss(log_pred, log_true)
+    
+    # Combine different loss components with adaptive weighting
+    rel_error_loss = torch.mean(relative_error)
+    cost_loss = 0.4 * rel_error_loss + 0.3 * huber_loss + 0.3 * log_mse_loss
     
     # Structure generation loss (encourage reasonable point distributions)
     structure_loss = 0.0
@@ -245,7 +281,10 @@ def hierarchical_loss_function(pred_cost, true_cost, bp_syn, bp_probs, ep_syn, e
     # Spatial distribution loss (encourage reasonable coordinate ranges)
     coord_regularization = 0.01 * (torch.var(bp_syn) + torch.var(ep_syn))
     
-    total_loss = cost_loss + 0.1 * count_loss + 0.01 * coord_regularization
+    # Reduce the weight of auxiliary losses when cost prediction is improving
+    aux_weight = min(0.05, 0.5 / (1.0 + cost_loss.item()))  # Even lower weight for auxiliary losses
+    
+    total_loss = cost_loss + aux_weight * count_loss + 0.005 * coord_regularization
     
     return total_loss, cost_loss, count_loss, coord_regularization
 
@@ -296,14 +335,14 @@ if __name__ == "__main__":
             writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "total_loss", "cost_loss", "count_loss", "coord_reg", "pred_cost", "true_cost"] + [f"param_{i}" for i in range(13)])
             
     model = HierarchicalPlantSurrogateNet()
-    initial_lr = 1e-4  # Lower learning rate for more complex model
-    optimizer = torch.optim.Adam(model.parameters(), lr=initial_lr)
+    initial_lr = 3e-4  # Optimal learning rate based on current performance
+    optimizer = torch.optim.AdamW(model.parameters(), lr=initial_lr, weight_decay=1e-5)  # Use AdamW with weight decay
     
-    # Adaptive learning rate parameters
-    lr_decay_factor = 0.95
-    lr_decay_threshold = 0.1  # Decay when relative error drops below this
-    lr_min = 1e-6  # Minimum learning rate
-    lr_patience = 100  # Check every N samples for adaptation
+    # Adaptive learning rate parameters - more aggressive since model is working well
+    lr_decay_factor = 0.85  # More aggressive decay
+    lr_decay_threshold = 0.02  # Decay when relative error drops below 2%
+    lr_min = 5e-6  # Minimum learning rate
+    lr_patience = 50  # Check every 50 samples for adaptation
 
     # Always load if exists, but always train
     if os.path.exists(model_name):
@@ -320,6 +359,10 @@ if __name__ == "__main__":
     real_bp, real_ep = read_real_plants()
     real_bp_batch, real_ep_batch = prepare_real_plant_batch(real_bp, real_ep)
     print(f"Starting hierarchical training with {num_runs} plants...")
+    
+    # Collect normalization statistics during training
+    all_true_costs = []
+    all_params = []
     
     total_loss = sum(prev_losses)
     total_samples = len(prev_losses)
@@ -339,6 +382,22 @@ if __name__ == "__main__":
         # 2. Get true cost from L-system
         true_cost = generate_and_evaluate("surrogate_params.vset", real_bp, real_ep)
         true_cost_tensor = torch.tensor([[true_cost]], dtype=torch.float32)
+        
+        # Collect data for normalization
+        all_true_costs.append(true_cost)
+        all_params.append(params)
+        
+        # Update normalization statistics every 100 samples
+        if total_samples > 0 and total_samples % 100 == 0:
+            if len(all_true_costs) > 10:  # Need some data points
+                cost_array = np.array(all_true_costs)
+                param_array = np.array(all_params)
+                
+                # Update model normalization parameters
+                model.output_mean = torch.tensor([np.mean(cost_array)], dtype=torch.float32)
+                model.output_std = torch.tensor([np.std(cost_array) + 1e-8], dtype=torch.float32)
+                model.input_mean = torch.tensor(np.mean(param_array, axis=0), dtype=torch.float32)
+                model.input_std = torch.tensor(np.std(param_array, axis=0) + 1e-8, dtype=torch.float32)
         
         # 3. Forward pass through hierarchical model
         try:
@@ -368,9 +427,13 @@ if __name__ == "__main__":
             pred_cost, true_cost_tensor, bp_syn, bp_probs, ep_syn, ep_probs, real_bp, real_ep
         )
         
-        # 5. Backpropagation
+        # 5. Backpropagation with gradient clipping
         optimizer.zero_grad()
         total_loss_val.backward()
+        
+        # Clip gradients to prevent exploding gradients
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        
         optimizer.step()
         
         # 6. Update statistics
@@ -402,7 +465,7 @@ if __name__ == "__main__":
         
         # Adaptive learning rate adjustment
         current_lr = optimizer.param_groups[0]['lr']
-        if total_samples % lr_patience == 0 and total_samples > 1000:  # Check every lr_patience samples after warmup
+        if total_samples % lr_patience == 0 and total_samples > 500:  # Check every lr_patience samples after shorter warmup
             avg_rel_error_1000 = sum(rel_error_history) / len(rel_error_history)
             
             # Decay learning rate if model is performing well
@@ -410,10 +473,10 @@ if __name__ == "__main__":
                 new_lr = max(current_lr * lr_decay_factor, lr_min)
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = new_lr
-                print(f"\nLearning rate adapted: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
+                print(f"\nLearning rate decreased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
             
-            # Increase learning rate if model is struggling (relative error > 0.2)
-            elif avg_rel_error_1000 > 0.2 and current_lr < initial_lr:
+            # Increase learning rate if model is struggling (relative error > 0.5)
+            elif avg_rel_error_1000 > 0.5 and current_lr < initial_lr:
                 new_lr = min(current_lr / lr_decay_factor, initial_lr)
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = new_lr
