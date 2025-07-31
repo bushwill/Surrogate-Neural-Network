@@ -340,7 +340,7 @@ if __name__ == "__main__":
     
     # Add learning rate scheduler for better convergence
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.8, patience=200, verbose=True, min_lr=1e-6
+        optimizer, mode='min', factor=0.8, patience=200, min_lr=1e-6
     )
     
     # Adaptive learning rate parameters

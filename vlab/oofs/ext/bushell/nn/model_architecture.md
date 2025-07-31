@@ -131,4 +131,3 @@ Input: L-system Parameters (13 dimensions)
 - **Learning Rate**: 3e-4 (adaptive scheduling)
 - **Loss Function**: Multi-component (relative error + Huber + log MSE)
 - **Accuracy Threshold**: 5% relative error
-- **Output Range**: Clamped to 40k-120k (typical cost range)
