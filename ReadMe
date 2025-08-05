@@ -3,7 +3,7 @@ Local env requirements:
 - docker-compose
 
 // Step 1: To create container: //
-docker-compose up --force-recreate --build -d
+docker compose up --force-recreate --build -d
 
 // Step 2: To attach to container and start a bash shell: //
 docker exec -it instance1 bash

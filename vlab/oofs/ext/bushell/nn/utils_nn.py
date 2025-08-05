@@ -4,18 +4,211 @@ import os
 import subprocess
 import shutil
 from plant_comparison_nn import calculate_cost, read_real_plants
+import torch
+import numpy as np
+import csv
+import time as t
 
-def get_normalization_stats():
+def clear_surrogate_dir():
+    """Clear and create surrogate directory for clean runs"""
+    folder = "surrogate"
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    else:
+        for filename in os.listdir(folder):
+            file_path = os.path.join(folder, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+
+def setup_training_csv(model_name, param_count=13):
+    """Setup CSV file for training logs with proper headers"""
+    csv_file = model_name + ".csv"
+    existing_rows = []
+    start_run = 0
+    prev_losses = []
+    
+    if os.path.exists(csv_file):
+        with open(csv_file, "r") as f:
+            reader = csv.reader(f)
+            existing_rows = list(reader)
+            start_run = len(existing_rows) - 1  # subtract header
+            # Read previous losses (skip header)
+            for row in existing_rows[1:]:
+                try:
+                    prev_losses.append(float(row[5]))  # Use cost_loss column (index 5) for consistency
+                except Exception:
+                    pass
+    
+    write_header = not os.path.exists(csv_file)
+    if write_header:
+        with open(csv_file, "a", newline="") as f:
+            writer = csv.writer(f)
+            # Standard header for neural network training logs
+            writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "total_loss", "cost_loss", "structure_reg", "pred_cost", "true_cost"] + [f"param_{i}" for i in range(param_count)])
+    
+    return start_run, prev_losses, csv_file
+
+def log_training_step(csv_file, run_number, total_loss_val, cost_loss, structure_reg, pred_cost, true_cost, params, avg_loss, avg_loss_change):
+    """Log a single training step to CSV"""
+    timestamp = t.strftime("%Y-%m-%d %H:%M:%S")
+    with open(csv_file, "a", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(
+            [run_number, timestamp, f"{avg_loss:.4f}", f"{avg_loss_change:.4f}", 
+             f"{total_loss_val:.4f}", f"{cost_loss:.4f}", 
+             f"{structure_reg:.4f}", f"{pred_cost:.4f}", f"{true_cost:.4f}"] +
+            [f"{p:.4f}" for p in params]
+        )
+
+def print_training_progress(idx, num_runs, start_run, avg_loss, total_loss_val, cost_loss, accuracy_1000, current_lr, start_time, rel_error=None, pred_cost=None, true_cost=None):
+    """Print standardized training progress with meaningful metrics"""
+    import sys
+    import time
+    
+    samples_done = idx + 1
+    percent = 100.0 * samples_done / num_runs
+    elapsed = time.time() - start_time
+    samples_left = num_runs - samples_done
+    avg_time_per_sample = elapsed / samples_done
+    eta = samples_left * avg_time_per_sample
+    eta_str = time.strftime('%H:%M:%S', time.gmtime(eta))
+    
+    # Calculate relative error if values provided
+    if rel_error is None and pred_cost is not None and true_cost is not None:
+        rel_error = abs(pred_cost - true_cost) / (abs(true_cost) + 1e-8)
+    
+    # Build progress string with meaningful metrics
+    progress_parts = [
+        f"Sample {start_run + idx + 1}",
+        f"({percent:.1f}%)",
+    ]
+    
+    if rel_error is not None:
+        progress_parts.append(f"rel_err={rel_error:.3f}")
+    
+    if pred_cost is not None and true_cost is not None:
+        progress_parts.append(f"pred={pred_cost:.0f}")
+        progress_parts.append(f"true={true_cost:.0f}")
+    
+    progress_parts.extend([
+        f"acc_1000={accuracy_1000:.1f}%",
+        f"lr={current_lr:.1e}",
+        f"ETA={eta_str}"
+    ])
+    
+    progress_str = " | ".join(progress_parts)
+    
+    sys.stdout.write(f"\r{progress_str}                    ")
+    sys.stdout.flush()
+
+def calculate_intrinsic_cost(bp_data, ep_data):
+    """
+    Calculate cost based on intrinsic plant structure properties.
+    This is a reusable cost function that doesn't require real plant comparison data.
+    """
+    if not bp_data or not ep_data:
+        return 30000.0
+    
+    total_cost = 0.0
+    num_days = len(bp_data)
+    
+    for day in range(num_days):
+        bp_day = bp_data[day] if day < len(bp_data) else []
+        ep_day = ep_data[day] if day < len(ep_data) else []
+        
+        # Calculate structure complexity cost - much more conservative scaling
+        num_bp = len(bp_day)
+        num_ep = len(ep_day)
+        
+        # Simple cost based on structure size - scale for realistic L-system output
+        structure_cost = (num_bp * 5) + (num_ep * 4)  # Much lower per-point cost
+        
+        # Minimal additional costs
+        if num_ep > 1:
+            spread_cost = 10.0  # Small fixed cost
+        else:
+            spread_cost = 5.0
+            
+        efficiency_cost = 10.0  # Small fixed cost
+            
+        daily_cost = structure_cost + spread_cost + efficiency_cost
+        total_cost += daily_cost
+    
+    # Keep it simple - just clamp to reasonable range
+    return max(5000.0, min(150000.0, total_cost))
+
+def get_normalization_stats(model_name=None):
     """
     Returns normalization statistics for the surrogate model.
-    Adjust these values according to your dataset.
-    For inputs (dimension 13) and a scalar output.
+    If model_name is provided, attempts to load stats from CSV file.
+    Otherwise returns reasonable defaults based on parameter ranges.
     """
-    import torch
-    input_mean = torch.zeros(13)
-    input_std = torch.ones(13)
-    output_mean = torch.tensor(0.0)
-    output_std = torch.tensor(1.0)
+    # Attempt to load from existing training data if available
+    if model_name:
+        csv_file = model_name + ".csv"
+        if os.path.exists(csv_file):
+            try:
+                import pandas as pd
+                df = pd.read_csv(csv_file)
+                if len(df) > 10:  # Need sufficient data
+                    # Calculate input stats from parameter columns (last 13 columns)
+                    param_cols = [f"param_{i}" for i in range(13)]
+                    if all(col in df.columns for col in param_cols):
+                        input_data = df[param_cols].values
+                        input_mean = torch.tensor(np.mean(input_data, axis=0), dtype=torch.float32)
+                        input_std = torch.tensor(np.std(input_data, axis=0) + 1e-8, dtype=torch.float32)
+                        
+                        # Calculate output stats from true_cost column
+                        if 'true_cost' in df.columns:
+                            output_data = df['true_cost'].values
+                            output_mean = torch.tensor([np.mean(output_data)], dtype=torch.float32)
+                            output_std = torch.tensor([np.std(output_data) + 1e-8], dtype=torch.float32)
+                            
+                            print(f"Loaded normalization stats from {csv_file}")
+                            return input_mean, input_std, output_mean, output_std
+            except ImportError:
+                pass  # pandas not available
+            except Exception as e:
+                print(f"Warning: Could not load stats from {csv_file}: {e}")
+    
+    # Return reasonable defaults based on parameter generation ranges
+    # These match the ranges in build_random_parameter_file()
+    input_mean = torch.tensor([
+        10.0,    # max_phytomers (mean ~10)
+        3.0,     # plastochron (mean ~3)
+        0.0,     # plant_roll_angle (mean ~0, can be ±90)
+        0.0,     # plant_down_angle (mean ~0)
+        135.0,   # branch_angle (mean ~135)
+        5.0,     # leaf_len (mean ~5)
+        0.5,     # exp_leaf_wid (mean ~0.5)
+        1.0,     # leaf_wid (mean ~1)
+        90.0,    # leaf_bend_scale (mean ~90)
+        180.0,   # leaf_twist_scale (mean ~180)
+        0.7,     # node_len (mean ~0.7)
+        0.9,     # int_wid (mean ~0.9)
+        0.5      # exp_int_rad (mean ~0.5)
+    ], dtype=torch.float32)
+    
+    input_std = torch.tensor([
+        1.0,     # max_phytomers std
+        0.1,     # plastochron std
+        15.0,    # plant_roll_angle std (wider range due to chirality)
+        4.0,     # plant_down_angle std
+        5.0,     # branch_angle std
+        1.0,     # leaf_len std
+        0.01,    # exp_leaf_wid std
+        0.1,     # leaf_wid std
+        3.0,     # leaf_bend_scale std
+        3.0,     # leaf_twist_scale std
+        0.05,    # node_len std
+        0.01,    # int_wid std
+        0.01     # exp_int_rad std
+    ], dtype=torch.float32)
+    
+    # Output stats based on intrinsic cost function range
+    output_mean = torch.tensor([50000.0], dtype=torch.float32)  # Middle of 5k-300k range
+    output_std = torch.tensor([75000.0], dtype=torch.float32)   # Reasonable spread
+    
     return input_mean, input_std, output_mean, output_std
 
 def generate_plant(param_file, output_dir):
@@ -139,7 +332,12 @@ def generate_and_evaluate(param_file, real_bp, real_ep):
         cost += calculate_cost(syn_bp[i], syn_ep[i], real_bp[i], real_ep[i])
     return cost
 
-def generateSurrogatePlant(param_file):
+def generateSurrogatePlant(param_file, calculate_cost_fn=None):
+        """
+        Generate plant using L-system. 
+        If calculate_cost_fn is provided, returns the cost.
+        Otherwise, just generates the plant files.
+        """
         # setup call to lpfg
         # lpfg_command = "lpfg -w 306 256 lsystem.l view.v materials.mat -a anim.a contours.cset functions.fset functions.tset loop_parameters.vset > log.txt"
         lpfg_command = f"lpfg -w 306 256 lsystem.l view.v materials.mat contours.cset functions.fset functions.tset {param_file} > surrogate/lpfg_log.txt"
@@ -155,6 +353,12 @@ def generateSurrogatePlant(param_file):
         process.wait()
         os.system(f"./project 2454 2056 leafposition.dat > surrogate/output.txt")
         shutil.move("leafposition.dat", f"./surrogate")
+        
+        # If cost calculation function provided, calculate and return cost
+        if calculate_cost_fn is not None:
+            syn_bp, syn_ep = read_syn_plant_surrogate()
+            return calculate_cost_fn(syn_bp, syn_ep)
+        
         
 def read_syn_plant_surrogate(file_name="surrogate/output.txt"):
     f = open(file_name, "r")

@@ -14,90 +14,11 @@ import sys
 import time as t
 import csv
 import numpy as np
-from plant_comparison_nn import make_matrix, make_index
-from utils_nn import build_random_parameter_file, get_normalization_stats
-
-def calculate_intrinsic_cost(bp_data, ep_data):
-    """
-    Calculate cost based on intrinsic plant structure properties
-    This replaces the need for real plant comparison data
-    """
-    if not bp_data or not ep_data:
-        return 30000.0  # Reduced base cost for minimal structure
-    
-    total_cost = 0.0
-    num_days = len(bp_data)
-    
-    for day in range(num_days):
-        bp_day = bp_data[day] if day < len(bp_data) else []
-        ep_day = ep_data[day] if day < len(ep_data) else []
-        
-        # Calculate structure complexity cost
-        num_bp = len(bp_day)
-        num_ep = len(ep_day)
-        
-        # Basic structure cost (more points = higher cost) - reduced multipliers
-        structure_cost = (num_bp * 100) + (num_ep * 80)
-        
-        # Calculate spatial distribution cost
-        if num_ep > 1:
-            ep_array = np.array(ep_day)
-            # Cost based on spatial spread (larger spread = higher cost)
-            if ep_array.ndim == 2 and ep_array.shape[0] > 1:
-                spread = np.max(ep_array, axis=0) - np.min(ep_array, axis=0)
-                spread_cost = np.sum(spread) * 8  # Reduced multiplier
-            else:
-                spread_cost = 80.0
-        else:
-            spread_cost = 40.0
-            
-        # Calculate branching efficiency cost
-        if num_bp > 0 and num_ep > 0:
-            branch_ratio = num_ep / max(num_bp, 1)
-            # Penalize inefficient branching patterns
-            efficiency_cost = abs(branch_ratio - 2.0) * 150  # Reduced penalty
-        else:
-            efficiency_cost = 300.0
-            
-        daily_cost = structure_cost + spread_cost + efficiency_cost
-        total_cost += daily_cost
-    
-    # Add growth progression cost (later days should generally have more structure)
-    if num_days > 1:
-        final_ep = len(ep_data[-1]) if ep_data[-1] else 0
-        initial_ep = len(ep_data[0]) if ep_data[0] else 0
-        growth_cost = max(0, (initial_ep - final_ep)) * 80  # Reduced penalty
-        total_cost += growth_cost
-    
-    # Clamp to more reasonable range that allows learning
-    return max(5000.0, min(300000.0, total_cost))
-
-def generateSurrogatePlant(param_file):
-    """Generate plant using L-system and return intrinsic cost"""
-    # setup call to lpfg
-    lpfg_command = f"lpfg -w 306 256 lsystem.l view.v materials.mat contours.cset functions.fset functions.tset {param_file} > surrogate/lpfg_log.txt"
-
-    if not os.path.exists("project"):
-        os.system("g++ -o project -Wall -Wextra project.cpp -lm")
-        
-    if not os.path.exists("surrogate"):
-        os.makedirs("surrogate")
-    
-    # Run lpfg to generate the plant
-    os.system(lpfg_command)
-    
-    # Read the generated plant data
-    from plant_comparison_nn import read_syn_plant_surrogate
-    syn_bp, syn_ep = read_syn_plant_surrogate()
-    
-    # Calculate cost based on intrinsic properties
-    cost = calculate_intrinsic_cost(syn_bp, syn_ep)
-    
-    return cost
-
-def generate_and_evaluate(param_file):
-    """Generate and evaluate plant using only intrinsic cost calculation"""
-    return generateSurrogatePlant(param_file)
+from plant_comparison_nn import make_matrix, make_index, calculate_cost, read_real_plants
+from utils_nn import (build_random_parameter_file, get_normalization_stats, generateSurrogatePlant, 
+                      clear_surrogate_dir, setup_training_csv, 
+                      log_training_step, print_training_progress, read_syn_plant_surrogate,
+                      generate_and_evaluate)
 
 model_name = "normal_hier_plant_surrogate_model.pt"
 accuracy_threshold = 0.05
@@ -171,7 +92,7 @@ class StructureProcessingNet(nn.Module):
         self.structure_analyzer = nn.Sequential(
             nn.Linear(input_dim, 256),
             nn.ReLU(),
-            nn.BatchNorm1d(256),
+            nn.LayerNorm(256),  # Use LayerNorm instead of BatchNorm1d
             nn.Linear(256, 256),
             nn.ReLU(),
             nn.Dropout(0.2),
@@ -296,13 +217,10 @@ class HierarchicalPlantSurrogateNet(nn.Module):
         self.cost_aggregator = CostAggregationNet(max_days)
         
         try:
-            self.input_mean, self.input_std, self.output_mean, self.output_std = get_normalization_stats()
+            self.input_mean, self.input_std, self.output_mean, self.output_std = get_normalization_stats("normal_hier_plant_surrogate_model.pt")
         except:
             print("Warning: Could not load normalization stats, using defaults")
-            self.input_mean = torch.zeros(input_dim)
-            self.input_std = torch.ones(input_dim)
-            self.output_mean = torch.tensor([0.0])
-            self.output_std = torch.tensor([1.0])
+            self.input_mean, self.input_std, self.output_mean, self.output_std = get_normalization_stats()
         
         if len(self.input_mean.shape) == 0:
             self.input_mean = self.input_mean.unsqueeze(0).repeat(input_dim)
@@ -388,16 +306,6 @@ def simplified_loss_function(pred_cost, true_cost, bp_syn, bp_probs, ep_syn, ep_
     
     return total_loss, cost_loss, structure_regularization
 
-def clear_surrogate_dir():
-    folder = "surrogate"
-    if not os.path.exists(folder):
-        os.makedirs(folder)
-    else:
-        for filename in os.listdir(folder):
-            file_path = os.path.join(folder, filename)
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-            
 if __name__ == "__main__":
     import time
     
@@ -411,29 +319,8 @@ if __name__ == "__main__":
     else:
         num_runs = 1000
 
-    # Read csv file
-    csv_file = model_name + ".csv"
-    if os.path.exists(csv_file):
-        with open(csv_file, "r") as f:
-            reader = csv.reader(f)
-            existing_rows = list(reader)
-            start_run = len(existing_rows) - 1  # subtract header
-            # Read previous losses (skip header)
-            prev_losses = []
-            for row in existing_rows[1:]:
-                try:
-                    prev_losses.append(float(row[5]))  # Use cost_loss column (index 5) for consistency
-                except Exception:
-                    pass
-    else:
-        start_run = 0
-        prev_losses = []
-    write_header = not os.path.exists(csv_file)
-    with open(csv_file, "a", newline="") as f:
-        writer = csv.writer(f)
-        if write_header:
-            # 1: run #, 2: datetime, 3: avg_loss, 4: avg_loss_change, 5: total_loss, 6: cost_loss, 7: structure_reg, 8: pred_cost, 9: true_cost, 10-22: params
-            writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "total_loss", "cost_loss", "structure_reg", "pred_cost", "true_cost"] + [f"param_{i}" for i in range(13)])
+    # Setup training CSV and get previous state
+    start_run, prev_losses, csv_file = setup_training_csv(model_name)
             
     model = HierarchicalPlantSurrogateNet()
     initial_lr = 1e-3 
@@ -456,8 +343,9 @@ if __name__ == "__main__":
     model.train()
     print(f"Starting hierarchical training with {num_runs} plants...")
     
-    # Note: We no longer need real plant data for training!
-    # The model is now a true surrogate that learns from parameters → cost pairs
+    # Load real plant data for comparison (just like the original model)
+    real_bp, real_ep = read_real_plants()
+    print(f"Loaded real plant data: {len(real_bp)} days")
     
     # Collect normalization statistics during training
     all_true_costs = []
@@ -478,8 +366,8 @@ if __name__ == "__main__":
         params = build_random_parameter_file("surrogate_params.vset")
         params_tensor = torch.tensor(params, dtype=torch.float32).unsqueeze(0)
         
-        # 2. Get true cost from L-system (this is the only L-system call we need!)
-        true_cost = generate_and_evaluate("surrogate_params.vset")
+        # 2. Get true cost from L-system using real plant comparison
+        true_cost = generate_and_evaluate("surrogate_params.vset", real_bp, real_ep)
         true_cost_tensor = torch.tensor([[true_cost]], dtype=torch.float32)
         
         # Collect data for normalization
@@ -568,37 +456,18 @@ if __name__ == "__main__":
         # Get current learning rate for display
         current_lr = optimizer.param_groups[0]['lr']
         
-        # Progress and ETA
-        samples_done = idx + 1
-        percent = 100.0 * samples_done / num_runs
-        elapsed = time.time() - start_time
-        samples_left = num_runs - samples_done
-        avg_time_per_sample = elapsed / samples_done
-        eta = samples_left * avg_time_per_sample
-        eta_str = time.strftime('%H:%M:%S', time.gmtime(eta))
-        
-        # Print progress with simplified loss components
-        sys.stdout.write(
-            f"\rSample {start_run + idx + 1}, ({percent:.2f}%): "
-            f"avg_loss={avg_loss:.4f}, "
-            f"total_loss={total_loss_val.item():.4f}, "
-            f"cost_loss={cost_loss.item():.4f}, "
-            f"acc_1000={accuracy_1000:.2f}%, lr={current_lr:.6f}, ETA={eta_str}      "
-        )
-        sys.stdout.flush()
+        # Print progress with meaningful metrics
+        print_training_progress(idx, num_runs, start_run, avg_loss, total_loss_val.item(), 
+                               cost_loss.item(), accuracy_1000, current_lr, start_time,
+                               rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost)
         
         clear_surrogate_dir()
         
         # Write to CSV with simplified loss components
-        with open(csv_file, "a", newline="") as f:
-            writer = csv.writer(f)
-            run_number = start_run + idx + 1
-            writer.writerow(
-                [run_number, timestamp, f"{avg_loss:.4f}", f"{avg_loss_change:.4f}", 
-                 f"{total_loss_val.item():.4f}", f"{cost_loss.item():.4f}", 
-                 f"{structure_reg.item():.4f}", f"{pred_cost.item():.4f}", f"{true_cost:.4f}"] +
-                [f"{p:.4f}" for p in params]
-            )
+        run_number = start_run + idx + 1
+        log_training_step(csv_file, run_number, total_loss_val.item(), cost_loss.item(), 
+                         structure_reg.item(), pred_cost.item(), true_cost, params, 
+                         avg_loss, avg_loss_change)
     print()  # Newline after progress bar
     torch.save(model.state_dict(), model_name)
     print(f"Trained and saved hierarchical model to {model_name}")
