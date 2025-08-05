@@ -9,10 +9,11 @@ import sys
 import time as t
 import csv
 from plant_comparison_nn import read_real_plants
-from utils_nn import build_random_parameter_file, generate_and_evaluate, get_normalization_stats
+from utils_nn import build_random_parameter_file, generate_and_evaluate, get_normalization_stats, print_training_progress
 
 model_name = "normal_plant_surrogate_model.pt"
-accuracy_threshold = 0.01
+accuracy_threshold_5pct = 0.05  # 5% threshold for accuracy
+accuracy_threshold_10pct = 0.10  # 10% threshold for accuracy
 
 class PlantSurrogateNet(nn.Module):
     def __init__(self, input_dim=13, output_dim=1):
@@ -28,9 +29,24 @@ class PlantSurrogateNet(nn.Module):
         # Retrieve normalization stats for inputs and outputs
         self.input_mean, self.input_std, self.output_mean, self.output_std = get_normalization_stats()
         
+        # Apply Xavier initialization to prevent constant outputs
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Initialize network weights using Xavier/Glorot initialization"""
+        for module in self.net:
+            if isinstance(module, nn.Linear):
+                # For output layer, use smaller gain to prevent extreme initial outputs
+                if module == list(self.net.modules())[-2]:  # Last linear layer (before Softplus)
+                    nn.init.xavier_uniform_(module.weight, gain=0.1)
+                else:
+                    nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+        
     def forward(self, x):
-        # Normalize inputs
-        x_norm = (x - self.input_mean) / self.input_std
+        # Normalize inputs (avoid division by zero)
+        x_norm = (x - self.input_mean) / (self.input_std + 1e-8)
         out_norm = self.net(x_norm)
         # Denormalize outputs
         return out_norm * self.output_std + self.output_mean
@@ -79,9 +95,14 @@ if __name__ == "__main__":
     with open(csv_file, "a", newline="") as f:
         writer = csv.writer(f)
         if write_header:
-            writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "loss", "pred_cost", "true_cost"] + [f"param_{i}" for i in range(13)])
+            writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "loss", "pred_cost", "true_cost", "rel_error", "accuracy_5pct", "accuracy_10pct"] + [f"param_{i}" for i in range(13)])
             
     model = PlantSurrogateNet()
+    
+    # Display model parameter count for comparison with hierarchical model
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Normal Surrogate Model - Total parameters: {total_params:,}")
+    
     initial_lr = 1e-3
     optimizer = torch.optim.Adam(model.parameters(), lr=initial_lr)
     loss_fn = nn.MSELoss()
@@ -145,8 +166,9 @@ if __name__ == "__main__":
         rel_error_history.append(rel_error)
         if len(rel_error_history) > 1000:
             rel_error_history.pop(0)
-        # Accuracy: percent of rel_error < 0.1 in last 1000 samples
-        accuracy_1000 = 100.0 * sum(e < accuracy_threshold for e in rel_error_history) / len(rel_error_history)
+        # Accuracy: percent of rel_error < thresholds in last 1000 samples
+        accuracy_5pct_1000 = 100.0 * sum(e < accuracy_threshold_5pct for e in rel_error_history) / len(rel_error_history)
+        accuracy_10pct_1000 = 100.0 * sum(e < accuracy_threshold_10pct for e in rel_error_history) / len(rel_error_history)
         
         # Adaptive learning rate adjustment
         current_lr = optimizer.param_groups[0]['lr']
@@ -166,28 +188,21 @@ if __name__ == "__main__":
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = new_lr
                 print(f"\nLearning rate increased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
-        # Progress and ETA
-        samples_done = idx + 1
-        percent = 100.0 * samples_done / num_runs
-        elapsed = time.time() - start_time
-        samples_left = num_runs - samples_done
-        avg_time_per_sample = elapsed / samples_done
-        eta = samples_left * avg_time_per_sample
-        eta_str = time.strftime('%H:%M:%S', time.gmtime(eta))
-        # Print progress with flush
-        sys.stdout.write(
-            f"\rSample {start_run + idx + 1}, ({percent:.2f}%): "
-            f"avg_loss={avg_loss:.4f}, "
-            f"avg_avg_loss_change={avg_loss_change_1000:.4f}, "
-            f"acc_1000={accuracy_1000:.2f}%, lr={current_lr:.6f}, ETA={eta_str}      "
+        
+        # Enhanced progress display using standardized function
+        current_lr = optimizer.param_groups[0]['lr']
+        print_training_progress(
+            idx, num_runs, start_run, avg_loss, loss.item(), loss.item(), 
+            accuracy_5pct_1000, current_lr, start_time, 
+            rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost
         )
-        sys.stdout.flush()
+        
         clear_surrogate_dir()
         with open(csv_file, "a", newline="") as f:
             writer = csv.writer(f)
             run_number = start_run + idx + 1
             writer.writerow(
-                [run_number, timestamp, f"{avg_loss:.4f}", f"{avg_loss_change:.4f}", f"{loss.item():.4f}", f"{pred_cost.item():.4f}", f"{true_cost:.4f}"] +
+                [run_number, timestamp, f"{avg_loss:.4f}", f"{avg_loss_change:.4f}", f"{loss.item():.4f}", f"{pred_cost.item():.4f}", f"{true_cost:.4f}", f"{rel_error:.4f}", f"{accuracy_5pct_1000:.1f}", f"{accuracy_10pct_1000:.1f}"] +
                 [f"{p:.4f}" for p in params]
             )
     print()  # Newline after progress bar
