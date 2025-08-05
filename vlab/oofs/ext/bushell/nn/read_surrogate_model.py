@@ -151,7 +151,7 @@ def plot_surrogate_training(data, save_plots=False):
 if __name__ == "__main__":
     import sys
 
-    directory = "Run 3 Data/"
+    directory = "Run 5 Data/"
     
     # Get CSV file from command line argument or use default
     if len(sys.argv) > 1:

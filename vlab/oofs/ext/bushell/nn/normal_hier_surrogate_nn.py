@@ -18,15 +18,14 @@ from plant_comparison_nn import read_real_plants, make_matrix, make_index
 from utils_nn import build_random_parameter_file, generate_and_evaluate, get_normalization_stats
 
 model_name = "normal_hier_plant_surrogate_model.pt"
-accuracy_threshold = 0.05  # 5% accuracy threshold (more realistic than 1%)
+accuracy_threshold = 0.05
 
 class StructureGenerationNet(nn.Module):
-    """Generates plant structure points (branch points and end points) from L-system parameters"""
+    # Generates plant structure points (branch points and end points) from L-system parameters
     def __init__(self, input_dim=13, max_points=50):
         super().__init__()
         self.max_points = max_points
         
-        # Shared feature extraction
         self.feature_net = nn.Sequential(
             nn.Linear(input_dim, 128),
             nn.ReLU(),
@@ -36,14 +35,12 @@ class StructureGenerationNet(nn.Module):
             nn.ReLU()
         )
         
-        # Branch point generation (x, y coordinates + existence probability)
         self.bp_net = nn.Sequential(
             nn.Linear(64, 128),
             nn.ReLU(),
             nn.Linear(128, max_points * 3)  # x, y, existence_prob for each point
         )
         
-        # End point generation (x, y coordinates + existence probability)
         self.ep_net = nn.Sequential(
             nn.Linear(64, 128),
             nn.ReLU(),
@@ -55,18 +52,18 @@ class StructureGenerationNet(nn.Module):
         
         # Generate branch points
         bp_raw = self.bp_net(features).view(-1, self.max_points, 3)
-        bp_coords = bp_raw[:, :, :2] * 200  # Scale coordinates to reasonable range
-        bp_probs = torch.sigmoid(bp_raw[:, :, 2])  # Existence probabilities
+        bp_coords = bp_raw[:, :, :2] * 200  # Scale coordinates
+        bp_probs = torch.sigmoid(bp_raw[:, :, 2])  # existence_prob
         
         # Generate end points
         ep_raw = self.ep_net(features).view(-1, self.max_points, 3)
-        ep_coords = ep_raw[:, :, :2] * 200  # Scale coordinates to reasonable range
-        ep_probs = torch.sigmoid(ep_raw[:, :, 2])  # Existence probabilities
+        ep_coords = ep_raw[:, :, :2] * 200  # Scale coordinates
+        ep_probs = torch.sigmoid(ep_raw[:, :, 2])  # existence_prob
         
         return bp_coords, bp_probs, ep_coords, ep_probs
 
 class HungarianAssignmentNet(nn.Module):
-    """Learns to predict optimal assignment patterns and costs"""
+    # Learns to predict optimal assignment patterns and costs
     def __init__(self, max_points=50):
         super().__init__()
         self.max_points = max_points
@@ -77,7 +74,7 @@ class HungarianAssignmentNet(nn.Module):
         input_dim = max_points * 8
         
         self.structure_encoder = nn.Sequential(
-            nn.Linear(input_dim, 256),  # Fixed input dimension
+            nn.Linear(input_dim, 256),
             nn.ReLU(),
             nn.Linear(256, 256),
             nn.ReLU(),
@@ -93,8 +90,11 @@ class HungarianAssignmentNet(nn.Module):
             nn.Softmax(dim=-1)
         )
         
-        # Predict assignment costs
+        # Predict assignment costs (focus on this)
         self.cost_net = nn.Sequential(
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Dropout(0.1),
             nn.Linear(128, 64),
             nn.ReLU(),
             nn.Linear(64, 1),
@@ -104,42 +104,42 @@ class HungarianAssignmentNet(nn.Module):
     def forward(self, bp_syn, ep_syn, bp_real, ep_real):
         batch_size = bp_syn.size(0)
         
-        # Debug: Print tensor shapes
         # print(f"bp_syn shape: {bp_syn.shape}, ep_syn shape: {ep_syn.shape}")
         # print(f"bp_real shape: {bp_real.shape}, ep_real shape: {ep_real.shape}")
         
         # Flatten and concatenate structures
         # Each tensor is [batch_size, max_points, 2], flatten to [batch_size, max_points * 2]
         bp_syn_flat = bp_syn.view(batch_size, -1)      # [batch_size, max_points * 2]
-        ep_syn_flat = ep_syn.view(batch_size, -1)      # [batch_size, max_points * 2]  
-        bp_real_flat = bp_real.view(batch_size, -1)    # [batch_size, max_points * 2]
-        ep_real_flat = ep_real.view(batch_size, -1)    # [batch_size, max_points * 2]
+        ep_syn_flat = ep_syn.view(batch_size, -1)      
+        bp_real_flat = bp_real.view(batch_size, -1)    
+        ep_real_flat = ep_real.view(batch_size, -1)    
         
         structure_features = torch.cat([
             bp_syn_flat, ep_syn_flat, bp_real_flat, ep_real_flat
         ], dim=1)  # [batch_size, max_points * 8]
         
-        # Debug: Print concatenated tensor shape
         # print(f"structure_features shape: {structure_features.shape}")
         
         encoded = self.structure_encoder(structure_features)
         
-        # Predict assignment matrix and total cost
         assignment_weights = self.assignment_net(encoded).view(batch_size, self.max_points, self.max_points)
         total_cost = self.cost_net(encoded)
         
         return assignment_weights, total_cost
 
 class CostAggregationNet(nn.Module):
-    """Aggregates costs across multiple days and assignment patterns"""
+    # Aggregates costs across multiple days and assignment patterns
     def __init__(self, max_days=26):
         super().__init__()
         self.max_days = max_days
         
-        # Process temporal sequence of costs
         self.temporal_net = nn.Sequential(
-            nn.Linear(max_days, 64),
+            nn.Linear(max_days, 128),
             nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(0.1),
             nn.Linear(64, 32),
             nn.ReLU(),
             nn.Linear(32, 1),
@@ -151,25 +151,22 @@ class CostAggregationNet(nn.Module):
         return self.temporal_net(daily_costs)
 
 class HierarchicalPlantSurrogateNet(nn.Module):
-    """Hierarchical network combining all modules"""
+    # Hierarchical network combining all modules
     def __init__(self, input_dim=13, max_points=50, max_days=26):
         super().__init__()
         self.structure_gen = StructureGenerationNet(input_dim, max_points)
         self.hungarian_net = HungarianAssignmentNet(max_points)
         self.cost_aggregator = CostAggregationNet(max_days)
         
-        # Initialize normalization stats with reasonable defaults
         try:
             self.input_mean, self.input_std, self.output_mean, self.output_std = get_normalization_stats()
         except:
-            # Fallback to reasonable defaults if normalization stats don't exist
             print("Warning: Could not load normalization stats, using defaults")
             self.input_mean = torch.zeros(input_dim)
             self.input_std = torch.ones(input_dim)
             self.output_mean = torch.tensor([0.0])
             self.output_std = torch.tensor([1.0])
         
-        # Ensure tensors are properly shaped
         if len(self.input_mean.shape) == 0:
             self.input_mean = self.input_mean.unsqueeze(0).repeat(input_dim)
         if len(self.input_std.shape) == 0:
@@ -195,52 +192,37 @@ class HierarchicalPlantSurrogateNet(nn.Module):
         # Compute Hungarian assignment and costs for each day
         daily_costs = []
         
-        for day in range(real_bp_batch.size(1)):  # Iterate over days
+        for day in range(real_bp_batch.size(1)):  
             bp_real_day = real_bp_batch[:, day, :, :]  # [batch_size, max_points, 2]
-            ep_real_day = real_ep_batch[:, day, :, :]  # [batch_size, max_points, 2]
+            ep_real_day = real_ep_batch[:, day, :, :]  
             
-            # Get assignment and cost for this day
             assignment_weights, day_cost = self.hungarian_net(bp_syn, ep_syn, bp_real_day, ep_real_day)
             daily_costs.append(day_cost)
         
-        # Stack daily costs and aggregate
         daily_costs_tensor = torch.stack(daily_costs, dim=1).squeeze(-1)  # [batch_size, num_days]
         
-        # Pad or truncate to max_days
-        if daily_costs_tensor.size(1) < 26:
-            padding = torch.zeros(batch_size, 26 - daily_costs_tensor.size(1))
-            daily_costs_tensor = torch.cat([daily_costs_tensor, padding], dim=1)
-        else:
-            daily_costs_tensor = daily_costs_tensor[:, :26]
+        assert daily_costs_tensor.size(1) == 26, f"Expected 26 days but got {daily_costs_tensor.size(1)} days"
         
-        # Final cost aggregation
         final_cost = self.cost_aggregator(daily_costs_tensor)
-        
-        # Apply output scaling more carefully to avoid extreme values
         output_scale = self.output_std + 1e-8
         scaled_cost = final_cost * output_scale + self.output_mean
-        
-        # Use softer clamping with wider range based on actual data range
-        scaled_cost = torch.clamp(scaled_cost, min=30000.0, max=150000.0)
+        scaled_cost = torch.clamp(scaled_cost, min=10000.0, max=200000.0)
         
         return scaled_cost
 
 def prepare_real_plant_batch(real_bp, real_ep, max_points=50):
-    """Convert real plant data to fixed-size tensors for batch processing"""
+    # Convert real plant data to fixed-size tensors for batch processing
     num_days = len(real_bp)
     
-    # Initialize tensors
     bp_batch = torch.zeros(1, num_days, max_points, 2)
     ep_batch = torch.zeros(1, num_days, max_points, 2)
     
     for day in range(num_days):
-        # Branch points
         bp_day = real_bp[day]
         if len(bp_day) > 0:
             bp_array = torch.tensor(bp_day[:max_points], dtype=torch.float32)
             bp_batch[0, day, :min(len(bp_day), max_points), :] = bp_array
         
-        # End points
         ep_day = real_ep[day]
         if len(ep_day) > 0:
             ep_array = torch.tensor(ep_day[:max_points], dtype=torch.float32)
@@ -249,44 +231,27 @@ def prepare_real_plant_batch(real_bp, real_ep, max_points=50):
     return bp_batch, ep_batch
 
 def hierarchical_loss_function(pred_cost, true_cost, bp_syn, bp_probs, ep_syn, ep_probs, real_bp, real_ep):
-    """Multi-component loss function for hierarchical training"""
+    # Loss function focusing on cost prediction accuracy
     
-    # Primary cost prediction loss - focus on relative error
+    # Primary cost prediction loss - focus on getting the scale right
+    # Use MSE loss for direct optimization
+    mse_loss = F.mse_loss(pred_cost, true_cost)
+    
+    # Add relative error component for better scaling
     relative_error = torch.abs(pred_cost - true_cost) / (torch.abs(true_cost) + 1e-8)
-    
-    # Use Huber loss for robustness to outliers
-    huber_loss = F.huber_loss(pred_cost / (true_cost + 1e-8), torch.ones_like(true_cost), delta=0.1)
-    
-    # Log-scale MSE for better handling of different scales
-    log_pred = torch.log(torch.clamp(pred_cost, min=1e-8))
-    log_true = torch.log(torch.clamp(true_cost, min=1e-8))
-    log_mse_loss = F.mse_loss(log_pred, log_true)
-    
-    # Combine different loss components with more balanced weighting
     rel_error_loss = torch.mean(relative_error)
-    cost_loss = 0.5 * rel_error_loss + 0.25 * huber_loss + 0.25 * log_mse_loss
     
-    # Structure generation loss (encourage reasonable point distributions)
-    structure_loss = 0.0
+    # Combine with emphasis on MSE for direct cost matching
+    cost_loss = 0.7 * mse_loss + 0.3 * rel_error_loss
     
-    # Existence probability regularization (prevent too many/few points)
-    bp_count_target = torch.tensor([min(len(day_bp), 50) for day_bp in real_bp]).float().mean()
-    ep_count_target = torch.tensor([min(len(day_ep), 50) for day_ep in real_ep]).float().mean()
+    # Much simpler auxiliary losses with very low weights
+    # Only add light regularization to prevent extreme outputs
+    structure_regularization = 0.001 * (torch.var(bp_syn) + torch.var(ep_syn))
     
-    bp_count_pred = bp_probs.sum()
-    ep_count_pred = ep_probs.sum()
+    # Focus primarily on cost prediction
+    total_loss = cost_loss + structure_regularization
     
-    count_loss = F.mse_loss(bp_count_pred, bp_count_target) + F.mse_loss(ep_count_pred, ep_count_target)
-    
-    # Spatial distribution loss (encourage reasonable coordinate ranges)
-    coord_regularization = 0.01 * (torch.var(bp_syn) + torch.var(ep_syn))
-    
-    # Reduce the weight of auxiliary losses when cost prediction is improving
-    aux_weight = min(0.05, 0.5 / (1.0 + cost_loss.item()))  # Even lower weight for auxiliary losses
-    
-    total_loss = cost_loss + aux_weight * count_loss + 0.005 * coord_regularization
-    
-    return total_loss, cost_loss, count_loss, coord_regularization
+    return total_loss, cost_loss, torch.tensor(0.0), structure_regularization
 
 def clear_surrogate_dir():
     folder = "surrogate"
@@ -332,24 +297,18 @@ if __name__ == "__main__":
     with open(csv_file, "a", newline="") as f:
         writer = csv.writer(f)
         if write_header:
-            writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "total_loss", "cost_loss", "count_loss", "coord_reg", "pred_cost", "true_cost"] + [f"param_{i}" for i in range(13)])
+            # 1: run #, 2: datetime, 3: avg_loss, 4: avg_loss_change, 5: total_loss, 6: cost_loss, 7: structure_reg, 8: pred_cost, 9: true_cost, 10-22: params
+            writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "total_loss", "cost_loss", "structure_reg", "pred_cost", "true_cost"] + [f"param_{i}" for i in range(13)])
             
     model = HierarchicalPlantSurrogateNet()
-    initial_lr = 2e-4  # Slightly lower initial learning rate for stability
-    optimizer = torch.optim.AdamW(model.parameters(), lr=initial_lr, weight_decay=1e-5)
+    initial_lr = 1e-3 
+    optimizer = torch.optim.Adam(model.parameters(), lr=initial_lr, weight_decay=1e-4)
     
-    # Add learning rate scheduler for better convergence
+    # initialize learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.8, patience=200, min_lr=1e-6
+        optimizer, mode='min', factor=0.7, patience=200, min_lr=1e-6, verbose=True
     )
-    
-    # Adaptive learning rate parameters
-    lr_decay_factor = 0.85
-    lr_decay_threshold = 0.02
-    lr_min = 5e-6
-    lr_patience = 50
 
-    # Always load if exists, but always train
     if os.path.exists(model_name):
         try:
             model.load_state_dict(torch.load(model_name))
@@ -392,17 +351,19 @@ if __name__ == "__main__":
         all_true_costs.append(true_cost)
         all_params.append(params)
         
-        # Update normalization statistics every 100 samples
-        if total_samples > 0 and total_samples % 100 == 0:
+        # Update normalization statistics every 100 samples (but don't update during training)
+        if total_samples == 100:  # Only update once early in training for stability
             if len(all_true_costs) > 10:  # Need some data points
                 cost_array = np.array(all_true_costs)
                 param_array = np.array(all_params)
                 
-                # Update model normalization parameters
+                # Update model normalization parameters once
                 model.output_mean = torch.tensor([np.mean(cost_array)], dtype=torch.float32)
                 model.output_std = torch.tensor([np.std(cost_array) + 1e-8], dtype=torch.float32)
                 model.input_mean = torch.tensor(np.mean(param_array, axis=0), dtype=torch.float32)
                 model.input_std = torch.tensor(np.std(param_array, axis=0) + 1e-8, dtype=torch.float32)
+                print(f"\nUpdated normalization stats at sample {total_samples}")
+                print(f"Cost mean: {model.output_mean.item():.1f}, std: {model.output_std.item():.1f}")
         
         # 3. Forward pass through hierarchical model
         try:
@@ -428,7 +389,7 @@ if __name__ == "__main__":
             bp_syn, bp_probs, ep_syn, ep_probs = model.structure_gen(params_norm)
         
         # 4. Compute hierarchical loss
-        total_loss_val, cost_loss, count_loss, coord_reg = hierarchical_loss_function(
+        total_loss_val, cost_loss, count_loss, structure_reg = hierarchical_loss_function(
             pred_cost, true_cost_tensor, bp_syn, bp_probs, ep_syn, ep_probs, real_bp, real_ep
         )
         
@@ -471,24 +432,8 @@ if __name__ == "__main__":
         # Accuracy: percent of rel_error < 0.1 in last 1000 samples
         accuracy_1000 = 100.0 * sum(e < accuracy_threshold for e in rel_error_history) / len(rel_error_history)
         
-        # Adaptive learning rate adjustment
+        # Get current learning rate for display
         current_lr = optimizer.param_groups[0]['lr']
-        if total_samples % lr_patience == 0 and total_samples > 500:  # Check every lr_patience samples after shorter warmup
-            avg_rel_error_1000 = sum(rel_error_history) / len(rel_error_history)
-            
-            # Decay learning rate if model is performing well
-            if avg_rel_error_1000 < lr_decay_threshold and current_lr > lr_min:
-                new_lr = max(current_lr * lr_decay_factor, lr_min)
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = new_lr
-                print(f"\nLearning rate decreased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
-            
-            # Increase learning rate if model is struggling (relative error > 0.5)
-            elif avg_rel_error_1000 > 0.5 and current_lr < initial_lr:
-                new_lr = min(current_lr / lr_decay_factor, initial_lr)
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = new_lr
-                print(f"\nLearning rate increased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
         
         # Progress and ETA
         samples_done = idx + 1
@@ -499,27 +444,26 @@ if __name__ == "__main__":
         eta = samples_left * avg_time_per_sample
         eta_str = time.strftime('%H:%M:%S', time.gmtime(eta))
         
-        # Print progress with hierarchical loss components
+        # Print progress with simplified loss components
         sys.stdout.write(
             f"\rSample {start_run + idx + 1}, ({percent:.2f}%): "
             f"avg_loss={avg_loss:.4f}, "
             f"total_loss={total_loss_val.item():.4f}, "
             f"cost_loss={cost_loss.item():.4f}, "
-            f"count_loss={count_loss.item():.4f}, "
             f"acc_1000={accuracy_1000:.2f}%, lr={current_lr:.6f}, ETA={eta_str}      "
         )
         sys.stdout.flush()
         
         clear_surrogate_dir()
         
-        # Write to CSV with hierarchical loss components
+        # Write to CSV with simplified loss components
         with open(csv_file, "a", newline="") as f:
             writer = csv.writer(f)
             run_number = start_run + idx + 1
             writer.writerow(
                 [run_number, timestamp, f"{avg_loss:.4f}", f"{avg_loss_change:.4f}", 
-                 f"{total_loss_val.item():.4f}", f"{cost_loss.item():.4f}", f"{count_loss.item():.4f}", 
-                 f"{coord_reg.item():.4f}", f"{pred_cost.item():.4f}", f"{true_cost:.4f}"] +
+                 f"{total_loss_val.item():.4f}", f"{cost_loss.item():.4f}", 
+                 f"{structure_reg.item():.4f}", f"{pred_cost.item():.4f}", f"{true_cost:.4f}"] +
                 [f"{p:.4f}" for p in params]
             )
     print()  # Newline after progress bar

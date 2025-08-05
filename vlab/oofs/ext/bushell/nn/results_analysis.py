@@ -6,9 +6,7 @@ Generate plots and statistics for paper publication.
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
 from scipy import stats
-import torch
 
 def analyze_training_convergence(csv_file):
     """Analyze training convergence and create publication-quality plots"""
@@ -91,6 +89,7 @@ def performance_metrics_table(df):
 
 if __name__ == "__main__":
     # Analyze your results
-    csv_file = "normal_hier_plant_surrogate_model.pt.csv"
+    directory = "Run 5 Data"
+    csv_file = f"{directory}/normal_hier_plant_surrogate_model.pt.csv"
     df = analyze_training_convergence(csv_file)
     metrics = performance_metrics_table(df)
