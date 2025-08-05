@@ -12,7 +12,7 @@ from normal_hier_surrogate_nn import HierarchicalPlantSurrogateNet
 from utils_nn import build_random_parameter_file
 
 # Configuration: Path to trained model
-MODEL_PATH = "normal_hier_plant_surrogate_model.pt"
+MODEL_PATH = "Normal Data/normal_hier_plant_surrogate_model.pt"
 
 def visualize_probabilistic_plant_structure(model, params, day=25, figsize=(12, 10), 
                                           min_opacity=0.1, max_opacity=0.9, 
@@ -67,31 +67,17 @@ def visualize_probabilistic_plant_structure(model, params, day=25, figsize=(12, 
     bp_opacity = min_opacity + (max_opacity - min_opacity) * bp_prob
     ep_opacity = min_opacity + (max_opacity - min_opacity) * ep_prob
     
-    # Plot branch points with probability-based opacity
+    # Plot branch points with probability-based opacity (small circles only)
     for i in range(len(bp_x)):
         if bp_prob[i] > 0.01:  # Only show points with reasonable probability
-            ax.scatter(bp_x[i], bp_y[i], c=bp_color, s=point_size, 
-                      alpha=bp_opacity[i], marker='o', edgecolors='black', linewidths=0.5)
+            ax.scatter(bp_x[i], bp_y[i], c=bp_color, s=20, 
+                      alpha=bp_opacity[i], marker='o', edgecolors='none')
     
-    # Plot end points with probability-based opacity
+    # Plot end points with probability-based opacity (small circles only)
     for i in range(len(ep_x)):
         if ep_prob[i] > 0.01:  # Only show points with reasonable probability
-            ax.scatter(ep_x[i], ep_y[i], c=ep_color, s=point_size, 
-                      alpha=ep_opacity[i], marker='^', edgecolors='black', linewidths=0.5)
-    
-    # Add probability-based connections (optional - connect high probability points)
-    # This creates a more plant-like structure visualization
-    high_bp_indices = np.where(bp_prob > 0.3)[0]
-    high_ep_indices = np.where(ep_prob > 0.3)[0]
-    
-    # Connect branch points to nearby end points if both have high probability
-    for bp_idx in high_bp_indices:
-        for ep_idx in high_ep_indices:
-            distance = np.sqrt((bp_x[bp_idx] - ep_x[ep_idx])**2 + (bp_y[bp_idx] - ep_y[ep_idx])**2)
-            if distance < 100:  # Reasonable connection distance
-                connection_alpha = min(bp_prob[bp_idx], ep_prob[ep_idx]) * 0.5
-                ax.plot([bp_x[bp_idx], ep_x[ep_idx]], [bp_y[bp_idx], ep_y[ep_idx]], 
-                       'gray', alpha=connection_alpha, linewidth=1)
+            ax.scatter(ep_x[i], ep_y[i], c=ep_color, s=20, 
+                      alpha=ep_opacity[i], marker='o', edgecolors='none')
     
     # Customize the plot
     ax.set_xlim(0, 500 * temporal_scale)
@@ -183,29 +169,16 @@ def create_comprehensive_plant_visualization(model, params, days=[0, 5, 10, 15, 
         bp_opacity = 0.2 + 0.8 * bp_prob
         ep_opacity = 0.2 + 0.8 * ep_prob
         
-        # Plot points with larger size for better visibility
+        # Plot points (small circles only) - no connections to keep visualization clean
         for i in range(len(bp_x)):
             if bp_prob[i] > 0.05:
-                ax.scatter(bp_x[i], bp_y[i], c='red', s=40, 
-                          alpha=bp_opacity[i], marker='o', edgecolors='black', linewidths=0.5)
+                ax.scatter(bp_x[i], bp_y[i], c='red', s=15, 
+                          alpha=bp_opacity[i], marker='o', edgecolors='none')
         
         for i in range(len(ep_x)):
             if ep_prob[i] > 0.05:
-                ax.scatter(ep_x[i], ep_y[i], c='blue', s=40, 
-                          alpha=ep_opacity[i], marker='^', edgecolors='black', linewidths=0.5)
-        
-        # Add probability-based connections for high-probability points
-        high_bp_indices = np.where(bp_prob > 0.3)[0]
-        high_ep_indices = np.where(ep_prob > 0.3)[0]
-        
-        # Connect branch points to nearby end points if both have high probability
-        for bp_idx in high_bp_indices:
-            for ep_idx in high_ep_indices:
-                distance = np.sqrt((bp_x[bp_idx] - ep_x[ep_idx])**2 + (bp_y[bp_idx] - ep_y[ep_idx])**2)
-                if distance < max_coord * 0.2:  # Scale connection distance with growth
-                    connection_alpha = min(bp_prob[bp_idx], ep_prob[ep_idx]) * 0.4
-                    ax.plot([bp_x[bp_idx], ep_x[ep_idx]], [bp_y[bp_idx], ep_y[ep_idx]], 
-                           'gray', alpha=connection_alpha, linewidth=1)
+                ax.scatter(ep_x[i], ep_y[i], c='blue', s=15, 
+                          alpha=ep_opacity[i], marker='o', edgecolors='none')
         
         # Use consistent scale for all subplots to show growth
         ax.set_xlim(0, max_coord)
@@ -227,8 +200,7 @@ def create_comprehensive_plant_visualization(model, params, days=[0, 5, 10, 15, 
     # Add legend
     legend_elements = [
         mpatches.Patch(color='red', alpha=0.7, label='Branch Points'),
-        mpatches.Patch(color='blue', alpha=0.7, label='End Points'),
-        mpatches.Patch(color='gray', alpha=0.5, label='Connections (High Probability)')
+        mpatches.Patch(color='blue', alpha=0.7, label='End Points')
     ]
     
     # Place legend at the bottom center
@@ -283,9 +255,9 @@ if __name__ == "__main__":
     params = build_random_parameter_file("temp_params.vset")
     print(f"Generated parameters: {params}")
     
-    # Create comprehensive visualization
-    print("\nCreating comprehensive plant visualization...")
-    create_comprehensive_plant_visualization(model, params, 
-                                           save_path="comprehensive_plant_visualization.png")
+    # Create single day visualization (Day 25 - mature plant)
+    print("\nCreating Day 25 plant visualization...")
+    visualize_probabilistic_plant_structure(model, params, day=25, 
+                                           save_path="day_25_plant_visualization.png")
     
     print("\nVisualization complete!")
