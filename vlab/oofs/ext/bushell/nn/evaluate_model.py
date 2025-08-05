@@ -297,7 +297,6 @@ def generate_performance_table(model_summaries, output_dir=None):
             'Final Relative Error': f"{grouped_df['avg_relative_error'].iloc[-1]:.4f}",
             'Final Accuracy < 5%': f"{grouped_df['accuracy_5pct'].iloc[-1]:.1f}%",
             'Final Accuracy < 10%': f"{grouped_df['accuracy_10pct'].iloc[-1]:.1f}%",
-            'Best Accuracy < 5%': f"{grouped_df['accuracy_5pct'].max():.1f}%",
             'Mean Relative Error': f"{np.mean(final_1000_relative_errors):.4f}",
             'Median Relative Error': f"{np.median(final_1000_relative_errors):.4f}",
             'Std Relative Error': f"{np.std(final_1000_relative_errors):.4f}",
