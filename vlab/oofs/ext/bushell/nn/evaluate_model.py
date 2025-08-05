@@ -19,13 +19,14 @@ from pathlib import Path
 # ============================================================================
 
 CSV_FILES = [
-    "Run 7 Data/normal_hier_plant_surrogate_model.pt.csv",
+    "Run 8 Data/normal_hier_plant_surrogate_model.pt.csv",
+    "Run 8 Data/normal_plant_surrogate_model.pt.csv",
 ]
 
 # Optional: Custom model names (if not provided, will use directory names)
 CUSTOM_MODEL_NAMES = {
-    "normal_hier_plant_surrogate_model.pt.csv": "Hierarchical Model",
-    # "other_model.pt.csv": "Baseline Model",
+    "Run 8 Data/normal_hier_plant_surrogate_model.pt.csv": "Hierarchical Model",
+    "Run 8 Data/normal_plant_surrogate_model.pt.csv": "Baseline Model",
 }
 
 # Output settings
