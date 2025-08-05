@@ -18,14 +18,17 @@ from pathlib import Path
 # CONFIGURATION: Edit this list to specify which CSV files to compare
 # ============================================================================
 
-DIRECTORY = 'Run 7 Data/'
 CSV_FILES = [
-    DIRECTORY + "normal_hier_plant_surrogate_model.pt.csv",
+    "Run 7 Data/normal_hier_plant_surrogate_model.pt.csv",
+    "Run 6 Data/normal_hier_plant_surrogate_model.pt.csv",
+    "Run 5 Data/normal_hier_plant_surrogate_model.pt.csv",
+    "Run 4 Data/normal_hier_plant_surrogate_model.pt.csv",
+    "Run 3 Data/normal_plant_surrogate_model.pt.csv",
 ]
 
 # Optional: Custom model names (if not provided, will use directory names)
 CUSTOM_MODEL_NAMES = {
-    "normal_hier_plant_surrogate_model.pt.csv": "Hierarchical Model v1",
+    "normal_hier_plant_surrogate_model.pt.csv": "Hierarchical Model",
     # "other_model.pt.csv": "Baseline Model",
 }
 
@@ -55,6 +58,46 @@ def load_and_process_csvs(csv_paths=None, custom_names=None):
         
         # Clean column names (remove spaces)
         df.columns = df.columns.str.strip()
+        
+        # Print column information for debugging
+        print(f"Columns in {csv_path}: {list(df.columns)}")
+        
+        # Standardize column names for different model types
+        column_mapping = {
+            'avg_loss': 'cost_loss',  # Some models may use avg_loss instead of cost_loss
+            'loss': 'cost_loss',
+            'final_loss': 'cost_loss',
+            'individual_loss': 'cost_loss'
+        }
+        
+        # Apply column mapping if needed
+        for old_name, new_name in column_mapping.items():
+            if old_name in df.columns and 'cost_loss' not in df.columns:
+                df = df.rename(columns={old_name: new_name})
+                print(f"  Mapped '{old_name}' to '{new_name}'")
+        
+        # Ensure required columns exist
+        required_columns = ['pred_cost', 'true_cost']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            print(f"Warning: {csv_path} missing required columns {missing_columns}, skipping...")
+            continue
+        
+        # Create cost_loss if it doesn't exist (fallback to avg_loss or calculate from predictions)
+        if 'cost_loss' not in df.columns:
+            if 'avg_loss' in df.columns:
+                df['cost_loss'] = df['avg_loss']
+                print(f"  Using 'avg_loss' as 'cost_loss'")
+            else:
+                # Calculate a basic loss from predictions
+                df['cost_loss'] = np.abs(df['pred_cost'] - df['true_cost']) / df['true_cost']
+                print(f"  Calculated 'cost_loss' from predictions")
+        
+        # Create total_loss if it doesn't exist
+        if 'total_loss' not in df.columns:
+            df['total_loss'] = df['cost_loss']
+            print(f"  Using 'cost_loss' as 'total_loss'")
         
         # Determine model name
         if csv_path in custom_names:
@@ -103,13 +146,11 @@ def group_samples(df, num_groups=None):
         
         group = df.iloc[start_idx:end_idx]
         
-        # Calculate group statistics
+        # Calculate group statistics - handle missing columns gracefully
         group_stats = {
             'group_number': i + 1,
             'start_sample': start_idx + 1,
             'end_sample': end_idx,
-            'avg_cost_loss': group['cost_loss'].mean(),
-            'avg_total_loss': group['total_loss'].mean(),
             'avg_pred_cost': group['pred_cost'].mean(),
             'avg_true_cost': group['true_cost'].mean(),
             'avg_relative_error': np.mean(np.abs(group['pred_cost'] - group['true_cost']) / group['true_cost']),
@@ -117,6 +158,17 @@ def group_samples(df, num_groups=None):
             'accuracy_10pct': 100 * np.mean(np.abs(group['pred_cost'] - group['true_cost']) / group['true_cost'] < 0.10),
             'sample_count': len(group)
         }
+        
+        # Add optional columns if they exist
+        if 'cost_loss' in group.columns:
+            group_stats['avg_cost_loss'] = group['cost_loss'].mean()
+        else:
+            group_stats['avg_cost_loss'] = group_stats['avg_relative_error']  # Use relative error as fallback
+            
+        if 'total_loss' in group.columns:
+            group_stats['avg_total_loss'] = group['total_loss'].mean()
+        else:
+            group_stats['avg_total_loss'] = group_stats['avg_cost_loss']  # Use cost_loss as fallback
         
         grouped_data.append(group_stats)
     
@@ -284,12 +336,20 @@ def generate_performance_table(model_summaries, output_dir=None):
         
         # Calculate comprehensive metrics
         relative_errors = np.abs(df['pred_cost'] - df['true_cost']) / df['true_cost']
-        final_1000_relative_errors = relative_errors.iloc[-1000:]
+        final_1000_relative_errors = relative_errors.iloc[-min(1000, len(relative_errors)):]
+        
+        # Check if cost_loss column exists
+        if 'cost_loss' in grouped_df.columns:
+            final_cost_loss = grouped_df['avg_cost_loss'].iloc[-1]
+            cost_loss_stability = np.std(grouped_df['avg_cost_loss'].iloc[-min(10, len(grouped_df)):])
+        else:
+            final_cost_loss = grouped_df['avg_relative_error'].iloc[-1]
+            cost_loss_stability = np.std(grouped_df['avg_relative_error'].iloc[-min(10, len(grouped_df)):])
         
         metrics = {
             'Model': model_name,
             'Training Samples': f"{len(df):,}",
-            'Final Cost Loss': f"{grouped_df['avg_cost_loss'].iloc[-1]:.6f}",
+            'Final Cost Loss': f"{final_cost_loss:.6f}",
             'Final Relative Error': f"{grouped_df['avg_relative_error'].iloc[-1]:.4f}",
             'Final Accuracy < 5%': f"{grouped_df['accuracy_5pct'].iloc[-1]:.1f}%",
             'Final Accuracy < 10%': f"{grouped_df['accuracy_10pct'].iloc[-1]:.1f}%",
@@ -298,7 +358,7 @@ def generate_performance_table(model_summaries, output_dir=None):
             'Median Relative Error': f"{np.median(final_1000_relative_errors):.4f}",
             'Std Relative Error': f"{np.std(final_1000_relative_errors):.4f}",
             'R² Score': f"{stats.pearsonr(df['pred_cost'], df['true_cost'])[0]**2:.4f}",
-            'Convergence Stability': f"{np.std(grouped_df['avg_cost_loss'].iloc[-10:]):.6f}"
+            'Convergence Stability': f"{cost_loss_stability:.6f}"
         }
         
         performance_data.append(metrics)
