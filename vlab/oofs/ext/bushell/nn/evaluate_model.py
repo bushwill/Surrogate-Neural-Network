@@ -19,7 +19,11 @@ from pathlib import Path
 # ============================================================================
 
 CSV_FILES = [
-    "normal_hier_plant_surrogate_model.pt.csv",
+    "Run 7 Data/normal_hier_plant_surrogate_model.pt.csv",
+    "Run 6 Data/normal_hier_plant_surrogate_model.pt.csv",
+    "Run 5 Data/normal_hier_plant_surrogate_model.pt.csv",
+    "Run 4 Data/normal_hier_plant_surrogate_model.pt.csv",
+    "Run 3 Data/normal_plant_surrogate_model.pt.csv",
 ]
 
 # Optional: Custom model names (if not provided, will use directory names)
@@ -386,7 +390,6 @@ def main():
     num_groups = args.groups if args.groups else NUM_GROUPS
     
     # Update global variables if overridden
-    global NUM_GROUPS, OUTPUT_DIRECTORY
     NUM_GROUPS = num_groups
     OUTPUT_DIRECTORY = output_dir
     
