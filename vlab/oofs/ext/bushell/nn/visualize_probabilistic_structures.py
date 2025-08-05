@@ -135,10 +135,9 @@ def visualize_probabilistic_plant_structure(model, params, day=25, figsize=(12, 
     return fig, ax
 
 def create_comprehensive_plant_visualization(model, params, days=[0, 5, 10, 15, 20, 25], 
-                                          figsize=(20, 14), save_path=None, 
-                                          heatmap_day=25, grid_resolution=100):
+                                          figsize=(18, 12), save_path=None):
     """
-    Create a comprehensive visualization with heatmap background and 6 growth stages.
+    Create a 6-panel visualization showing plant growth stages.
     Uses consistent scaling to show actual plant growth progression.
     """
     
@@ -156,87 +155,13 @@ def create_comprehensive_plant_visualization(model, params, days=[0, 5, 10, 15, 
     max_temporal_scale = 0.1 * np.exp(growth_rate * max(days))
     max_coord = 500 * max_temporal_scale
     
-    # Create main figure with subplots
-    fig = plt.figure(figsize=figsize)
-    
-    # Create a 3x3 grid, with heatmap taking center position
-    gs = fig.add_gridspec(3, 3, height_ratios=[1, 1, 1], width_ratios=[1, 1, 1])
-    
-    # Create heatmap background (center position)
-    heatmap_ax = fig.add_subplot(gs[1, 1])
-    
-    # Generate heatmap for background
-    heatmap_temporal_scale = 0.1 * np.exp(growth_rate * heatmap_day)
-    bp_coords_heatmap = bp_coords * heatmap_temporal_scale
-    ep_coords_heatmap = ep_coords * heatmap_temporal_scale
-    
-    # Convert to numpy for heatmap
-    bp_x_heat = bp_coords_heatmap[0, :, 0].cpu().numpy()
-    bp_y_heat = bp_coords_heatmap[0, :, 1].cpu().numpy()
-    bp_prob_heat = bp_probs[0, :].cpu().numpy()
-    
-    ep_x_heat = ep_coords_heatmap[0, :, 0].cpu().numpy()
-    ep_y_heat = ep_coords_heatmap[0, :, 1].cpu().numpy()
-    ep_prob_heat = ep_probs[0, :].cpu().numpy()
-    
-    # Create probability density grid for heatmap
-    x_grid = np.linspace(0, max_coord, grid_resolution)
-    y_grid = np.linspace(0, max_coord, grid_resolution)
-    X, Y = np.meshgrid(x_grid, y_grid)
-    
-    # Calculate probability density using Gaussian kernels
-    prob_density = np.zeros_like(X)
-    sigma = max_coord / 50  # Kernel width
-    
-    # Add branch point contributions to heatmap
-    for i in range(len(bp_x_heat)):
-        if bp_prob_heat[i] > 0.01:
-            dist_sq = (X - bp_x_heat[i])**2 + (Y - bp_y_heat[i])**2
-            prob_density += bp_prob_heat[i] * np.exp(-dist_sq / (2 * sigma**2))
-    
-    # Add end point contributions to heatmap
-    for i in range(len(ep_x_heat)):
-        if ep_prob_heat[i] > 0.01:
-            dist_sq = (X - ep_x_heat[i])**2 + (Y - ep_y_heat[i])**2
-            prob_density += ep_prob_heat[i] * np.exp(-dist_sq / (2 * sigma**2))
-    
-    # Draw heatmap
-    im = heatmap_ax.imshow(prob_density, extent=[0, max_coord, 0, max_coord], 
-                          origin='lower', cmap='hot', alpha=0.3, vmin=0, vmax=prob_density.max())
-    
-    # Overlay high-probability points on heatmap
-    for i in range(len(bp_x_heat)):
-        if bp_prob_heat[i] > 0.2:
-            heatmap_ax.scatter(bp_x_heat[i], bp_y_heat[i], c='white', s=30, marker='o', 
-                              edgecolors='black', linewidths=1, alpha=0.8)
-    
-    for i in range(len(ep_x_heat)):
-        if ep_prob_heat[i] > 0.2:
-            heatmap_ax.scatter(ep_x_heat[i], ep_y_heat[i], c='cyan', s=30, marker='^', 
-                              edgecolors='black', linewidths=1, alpha=0.8)
-    
-    heatmap_ax.set_xlim(0, max_coord)
-    heatmap_ax.set_ylim(0, max_coord)
-    heatmap_ax.set_title(f'Probability Density\n(Day {heatmap_day})', fontweight='bold', fontsize=12)
-    heatmap_ax.grid(True, alpha=0.3)
-    
-    # Define subplot positions (surrounding the center heatmap)
-    subplot_positions = [
-        (0, 0), (0, 1), (0, 2),  # Top row
-        (1, 0),         (1, 2),  # Middle row (skip center)
-        (2, 0), (2, 1), (2, 2)   # Bottom row
-    ]
-    
-    # Skip position (1,1) as it's used for heatmap
-    subplot_positions = [(0, 0), (0, 1), (0, 2), (1, 0), (1, 2), (2, 0)]
+    # Create 2x3 subplot grid
+    fig, axes = plt.subplots(2, 3, figsize=figsize)
+    axes = axes.flatten()
     
     # Create growth sequence subplots
     for idx, day in enumerate(days):
-        if idx >= len(subplot_positions):
-            break
-            
-        pos = subplot_positions[idx]
-        ax = fig.add_subplot(gs[pos[0], pos[1]])
+        ax = axes[idx]
         
         # Calculate growth scale for this day
         temporal_scale = 0.1 * np.exp(growth_rate * day)
@@ -258,46 +183,57 @@ def create_comprehensive_plant_visualization(model, params, days=[0, 5, 10, 15, 
         bp_opacity = 0.2 + 0.8 * bp_prob
         ep_opacity = 0.2 + 0.8 * ep_prob
         
-        # Plot points
+        # Plot points with larger size for better visibility
         for i in range(len(bp_x)):
             if bp_prob[i] > 0.05:
-                ax.scatter(bp_x[i], bp_y[i], c='red', s=25, 
-                          alpha=bp_opacity[i], marker='o', edgecolors='black', linewidths=0.3)
+                ax.scatter(bp_x[i], bp_y[i], c='red', s=40, 
+                          alpha=bp_opacity[i], marker='o', edgecolors='black', linewidths=0.5)
         
         for i in range(len(ep_x)):
             if ep_prob[i] > 0.05:
-                ax.scatter(ep_x[i], ep_y[i], c='blue', s=25, 
-                          alpha=ep_opacity[i], marker='^', edgecolors='black', linewidths=0.3)
+                ax.scatter(ep_x[i], ep_y[i], c='blue', s=40, 
+                          alpha=ep_opacity[i], marker='^', edgecolors='black', linewidths=0.5)
+        
+        # Add probability-based connections for high-probability points
+        high_bp_indices = np.where(bp_prob > 0.3)[0]
+        high_ep_indices = np.where(ep_prob > 0.3)[0]
+        
+        # Connect branch points to nearby end points if both have high probability
+        for bp_idx in high_bp_indices:
+            for ep_idx in high_ep_indices:
+                distance = np.sqrt((bp_x[bp_idx] - ep_x[ep_idx])**2 + (bp_y[bp_idx] - ep_y[ep_idx])**2)
+                if distance < max_coord * 0.2:  # Scale connection distance with growth
+                    connection_alpha = min(bp_prob[bp_idx], ep_prob[ep_idx]) * 0.4
+                    ax.plot([bp_x[bp_idx], ep_x[ep_idx]], [bp_y[bp_idx], ep_y[ep_idx]], 
+                           'gray', alpha=connection_alpha, linewidth=1)
         
         # Use consistent scale for all subplots to show growth
         ax.set_xlim(0, max_coord)
         ax.set_ylim(0, max_coord)
-        ax.set_title(f'Day {day}\n({temporal_scale:.2f}x scale)', fontweight='bold', fontsize=10)
+        ax.set_title(f'Day {day} - Growth Scale: {temporal_scale:.2f}x', 
+                    fontweight='bold', fontsize=12)
         ax.grid(True, alpha=0.3)
         
-        # Add axis labels only to edge subplots
-        if pos[0] == 2:  # Bottom row
-            ax.set_xlabel('X Coordinate', fontsize=9)
-        if pos[1] == 0:  # Left column
-            ax.set_ylabel('Y Coordinate', fontsize=9)
+        # Add axis labels
+        if idx >= 3:  # Bottom row
+            ax.set_xlabel('X Coordinate (pixels)', fontsize=10)
+        if idx % 3 == 0:  # Left column
+            ax.set_ylabel('Y Coordinate (pixels)', fontsize=10)
     
-    # Add overall title and legend
-    fig.suptitle('Probabilistic Plant Growth Analysis\nOpacity ∝ Existence Probability | Consistent Scale Shows Growth', 
-                fontsize=16, fontweight='bold', y=0.95)
+    # Add overall title
+    fig.suptitle('Probabilistic Plant Growth Sequence\nOpacity ∝ Existence Probability | Consistent Scale Shows Growth Progression', 
+                fontsize=16, fontweight='bold', y=0.96)
     
     # Add legend
     legend_elements = [
         mpatches.Patch(color='red', alpha=0.7, label='Branch Points'),
         mpatches.Patch(color='blue', alpha=0.7, label='End Points'),
-        mpatches.Patch(color='orange', alpha=0.5, label='Probability Density')
+        mpatches.Patch(color='gray', alpha=0.5, label='Connections (High Probability)')
     ]
     
-    # Place legend in the bottom right corner of the figure
-    fig.legend(handles=legend_elements, loc='lower right', bbox_to_anchor=(0.98, 0.02))
-    
-    # Add colorbar for heatmap
-    cbar = plt.colorbar(im, ax=heatmap_ax, fraction=0.046, pad=0.04)
-    cbar.set_label('Probability Density', fontsize=9)
+    # Place legend at the bottom center
+    fig.legend(handles=legend_elements, loc='lower center', 
+              bbox_to_anchor=(0.5, 0.02), ncol=3, fontsize=11)
     
     # Add statistics text box
     visible_bp = np.sum(bp_probs[0, :].cpu().numpy() > 0.1)
@@ -310,12 +246,20 @@ def create_comprehensive_plant_visualization(model, params, days=[0, 5, 10, 15, 
                  f"Visible End Points: {visible_ep:.0f}\n"
                  f"Avg BP Probability: {avg_bp_prob:.3f}\n"
                  f"Avg EP Probability: {avg_ep_prob:.3f}\n"
-                 f"Growth Factor: {max_temporal_scale:.2f}x")
+                 f"Max Growth Factor: {max_temporal_scale:.2f}x")
     
-    fig.text(0.02, 0.02, stats_text, fontsize=9, 
+    fig.text(0.02, 0.02, stats_text, fontsize=10, 
             bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8))
     
-    plt.tight_layout(rect=[0, 0.05, 1, 0.93])
+    # Add opacity explanation
+    opacity_text = ("Opacity Scale:\n"
+                   "Transparent = Low probability\n"
+                   "Opaque = High probability")
+    fig.text(0.98, 0.02, opacity_text, fontsize=10, 
+            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8),
+            horizontalalignment='right')
+    
+    plt.tight_layout(rect=[0, 0.08, 1, 0.94])
     
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
