@@ -23,7 +23,7 @@ def calculate_intrinsic_cost(bp_data, ep_data):
     This replaces the need for real plant comparison data
     """
     if not bp_data or not ep_data:
-        return 50000.0  # Base cost for minimal structure
+        return 30000.0  # Reduced base cost for minimal structure
     
     total_cost = 0.0
     num_days = len(bp_data)
@@ -36,8 +36,8 @@ def calculate_intrinsic_cost(bp_data, ep_data):
         num_bp = len(bp_day)
         num_ep = len(ep_day)
         
-        # Basic structure cost (more points = higher cost)
-        structure_cost = (num_bp * 150) + (num_ep * 100)
+        # Basic structure cost (more points = higher cost) - reduced multipliers
+        structure_cost = (num_bp * 100) + (num_ep * 80)
         
         # Calculate spatial distribution cost
         if num_ep > 1:
@@ -45,19 +45,19 @@ def calculate_intrinsic_cost(bp_data, ep_data):
             # Cost based on spatial spread (larger spread = higher cost)
             if ep_array.ndim == 2 and ep_array.shape[0] > 1:
                 spread = np.max(ep_array, axis=0) - np.min(ep_array, axis=0)
-                spread_cost = np.sum(spread) * 10
+                spread_cost = np.sum(spread) * 8  # Reduced multiplier
             else:
-                spread_cost = 100.0
+                spread_cost = 80.0
         else:
-            spread_cost = 50.0
+            spread_cost = 40.0
             
         # Calculate branching efficiency cost
         if num_bp > 0 and num_ep > 0:
             branch_ratio = num_ep / max(num_bp, 1)
             # Penalize inefficient branching patterns
-            efficiency_cost = abs(branch_ratio - 2.0) * 200  # Optimal ratio around 2
+            efficiency_cost = abs(branch_ratio - 2.0) * 150  # Reduced penalty
         else:
-            efficiency_cost = 500.0
+            efficiency_cost = 300.0
             
         daily_cost = structure_cost + spread_cost + efficiency_cost
         total_cost += daily_cost
@@ -66,11 +66,11 @@ def calculate_intrinsic_cost(bp_data, ep_data):
     if num_days > 1:
         final_ep = len(ep_data[-1]) if ep_data[-1] else 0
         initial_ep = len(ep_data[0]) if ep_data[0] else 0
-        growth_cost = max(0, (initial_ep - final_ep)) * 100  # Penalize shrinking
+        growth_cost = max(0, (initial_ep - final_ep)) * 80  # Reduced penalty
         total_cost += growth_cost
     
-    # Clamp to reasonable range
-    return max(10000.0, min(200000.0, total_cost))
+    # Clamp to more reasonable range that allows learning
+    return max(5000.0, min(300000.0, total_cost))
 
 def generateSurrogatePlant(param_file):
     """Generate plant using L-system and return intrinsic cost"""
@@ -128,6 +128,18 @@ class StructureGenerationNet(nn.Module):
             nn.ReLU(),
             nn.Linear(128, max_points * 3)  # x, y, existence_prob for each point
         )
+        
+        # Apply proper weight initialization
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Initialize weights to prevent constant outputs"""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                # Xavier/Glorot initialization
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
         
     def forward(self, x):
         features = self.feature_net(x)
@@ -194,6 +206,18 @@ class StructureProcessingNet(nn.Module):
             nn.Softplus()
         )
         
+        # Apply proper weight initialization
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Initialize weights to prevent constant outputs"""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                # Xavier/Glorot initialization
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+        
     def forward(self, bp_coords, bp_probs, ep_coords, ep_probs):
         batch_size = bp_coords.size(0)
         
@@ -244,6 +268,21 @@ class CostAggregationNet(nn.Module):
             nn.Softplus()
         )
         
+        # Apply proper weight initialization
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Initialize weights to prevent constant outputs"""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                # Xavier/Glorot initialization with smaller variance for output layer
+                if module == list(self.temporal_net.modules())[-2]:  # Last linear layer
+                    nn.init.xavier_uniform_(module.weight, gain=0.1)  # Smaller initial outputs
+                else:
+                    nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+        
     def forward(self, daily_costs):
         # daily_costs: [batch_size, num_days]
         return self.temporal_net(daily_costs)
@@ -273,6 +312,16 @@ class HierarchicalPlantSurrogateNet(nn.Module):
             self.output_mean = self.output_mean.unsqueeze(0)
         if len(self.output_std.shape) == 0:
             self.output_std = self.output_std.unsqueeze(0)
+            
+        # Apply proper weight initialization to prevent constant outputs
+        self._init_weights()
+        
+    def _init_weights(self):
+        """Initialize all network weights properly"""
+        # Initialize sub-networks
+        for module in [self.structure_gen, self.structure_processor, self.cost_aggregator]:
+            if hasattr(module, '_init_weights'):
+                module._init_weights()
         
     def forward(self, x):
         batch_size = x.size(0)
@@ -306,9 +355,14 @@ class HierarchicalPlantSurrogateNet(nn.Module):
         assert daily_costs_tensor.size(1) == 26, f"Expected 26 days but got {daily_costs_tensor.size(1)} days"
         
         final_cost = self.cost_aggregator(daily_costs_tensor)
+        
+        # Better output scaling - don't force minimum to 10000
         output_scale = self.output_std + 1e-8
         scaled_cost = final_cost * output_scale + self.output_mean
-        scaled_cost = torch.clamp(scaled_cost, min=10000.0, max=200000.0)
+        
+        # Use softer clamping with reasonable bounds based on actual data range
+        # Allow predictions to start low and learn the correct range
+        scaled_cost = torch.clamp(scaled_cost, min=5000.0, max=300000.0)
         
         return scaled_cost
 
