@@ -18,18 +18,14 @@ from pathlib import Path
 # CONFIGURATION: Edit this list to specify which CSV files to compare
 # ============================================================================
 
+DIRECTORY = 'Run 7 Data/'
 CSV_FILES = [
-    # Add your CSV file paths here
-    "normal_hier_plant_surrogate_model.pt.csv",
-    # "other_model.pt.csv",
-    # "baseline_model.pt.csv",
-    # "../Run_1/normal_hier_plant_surrogate_model.pt.csv",
-    # "../Run_2/normal_hier_plant_surrogate_model.pt.csv",
+    DIRECTORY + "normal_hier_plant_surrogate_model.pt.csv",
 ]
 
 # Optional: Custom model names (if not provided, will use directory names)
 CUSTOM_MODEL_NAMES = {
-    # "normal_hier_plant_surrogate_model.pt.csv": "Hierarchical Model v1",
+    "normal_hier_plant_surrogate_model.pt.csv": "Hierarchical Model v1",
     # "other_model.pt.csv": "Baseline Model",
 }
 
@@ -335,7 +331,6 @@ def main():
     num_groups = args.groups if args.groups else NUM_GROUPS
     
     # Update global variables if overridden
-    global NUM_GROUPS, OUTPUT_DIRECTORY
     NUM_GROUPS = num_groups
     OUTPUT_DIRECTORY = output_dir
     
