@@ -95,7 +95,6 @@ class StructureProcessingNet(nn.Module):
             nn.LayerNorm(256),  # Use LayerNorm instead of BatchNorm1d
             nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Dropout(0.2),
             nn.Linear(256, 128),
             nn.ReLU()
         )
@@ -120,7 +119,6 @@ class StructureProcessingNet(nn.Module):
         self.daily_cost_net = nn.Sequential(
             nn.Linear(128, 64),  # 64 + 64 = 128 from geometry + topology
             nn.ReLU(),
-            nn.Dropout(0.1),
             nn.Linear(64, 32),
             nn.ReLU(),
             nn.Linear(32, 1),
@@ -179,10 +177,8 @@ class CostAggregationNet(nn.Module):
         self.temporal_net = nn.Sequential(
             nn.Linear(max_days, 128),
             nn.ReLU(),
-            nn.Dropout(0.1),
             nn.Linear(128, 64),
             nn.ReLU(),
-            nn.Dropout(0.1),
             nn.Linear(64, 32),
             nn.ReLU(),
             nn.Linear(32, 1),
@@ -255,12 +251,17 @@ class HierarchicalPlantSurrogateNet(nn.Module):
         daily_costs = []
         
         for day in range(26):  
-            # Add temporal variation to structure processing
-            # Slight perturbation based on day to simulate temporal growth patterns
-            day_factor = torch.tensor(day / 25.0, dtype=torch.float32)  # 0 to 1
+            # Exponential growth simulation: seed → mature plant over 26 days
+            # Day 0: tiny seed (scale = 0.1)
+            # Day 25: mature plant (scale = 1.0)
+            # Uses exponential growth curve: scale = 0.1 * exp(growth_rate * day)
+            growth_rate = np.log(10) / 25  # ln(10)/25 gives 10x growth over 25 days
             
-            # Apply temporal scaling to coordinates to simulate growth
-            temporal_scale = 1.0 + day_factor * 0.5  # Scale from 1.0 to 1.5
+            # Exponential growth: starts at 0.1x, grows to 1.0x by day 25
+            temporal_scale = 0.1 * np.exp(growth_rate * day)
+            temporal_scale = torch.tensor(temporal_scale, dtype=torch.float32)
+            
+            # Apply exponential growth scaling to coordinates
             bp_coords_day = bp_syn * temporal_scale
             ep_coords_day = ep_syn * temporal_scale
             
@@ -277,10 +278,6 @@ class HierarchicalPlantSurrogateNet(nn.Module):
         # Better output scaling - don't force minimum to 10000
         output_scale = self.output_std + 1e-8
         scaled_cost = final_cost * output_scale + self.output_mean
-        
-        # Use softer clamping with reasonable bounds based on actual data range
-        # Allow predictions to start low and learn the correct range
-        scaled_cost = torch.clamp(scaled_cost, min=5000.0, max=300000.0)
         
         return scaled_cost
 
@@ -387,6 +384,7 @@ if __name__ == "__main__":
                 model.input_std = torch.tensor(np.std(param_array, axis=0) + 1e-8, dtype=torch.float32)
                 print(f"\nUpdated normalization stats at sample {total_samples}")
                 print(f"Cost mean: {model.output_mean.item():.1f}, std: {model.output_std.item():.1f}")
+                print(f"Cost range in first 100 samples: [{np.min(cost_array):.1f}, {np.max(cost_array):.1f}]")
         
         # 3. Forward pass through hierarchical model (no real plant data needed!)
         try:
@@ -423,8 +421,16 @@ if __name__ == "__main__":
         
         optimizer.step()
         
+        # Get current learning rate before scheduler step
+        prev_lr = optimizer.param_groups[0]['lr']
+        
         # Step the learning rate scheduler
         scheduler.step(cost_loss.item())
+        
+        # Check if learning rate was changed by scheduler
+        current_lr = optimizer.param_groups[0]['lr']
+        if prev_lr != current_lr:
+            print(f"\nLearning rate reduced by scheduler: {prev_lr:.6f} -> {current_lr:.6f} (cost_loss={cost_loss.item():.4f})")
         
         # 6. Update statistics
         total_loss += cost_loss.item()  # Track only cost loss for comparison
@@ -453,8 +459,7 @@ if __name__ == "__main__":
         # Accuracy: percent of rel_error < 0.1 in last 1000 samples
         accuracy_1000 = 100.0 * sum(e < accuracy_threshold for e in rel_error_history) / len(rel_error_history)
         
-        # Get current learning rate for display
-        current_lr = optimizer.param_groups[0]['lr']
+        # Current learning rate already obtained above for change detection
         
         # Print progress with meaningful metrics
         print_training_progress(idx, num_runs, start_run, avg_loss, total_loss_val.item(), 
