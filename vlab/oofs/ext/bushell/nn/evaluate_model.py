@@ -19,14 +19,12 @@ from pathlib import Path
 # ============================================================================
 
 CSV_FILES = [
-    "Run 8 Data/normal_hier_plant_surrogate_model.pt.csv",
-    "Run 8 Data/normal_plant_surrogate_model.pt.csv",
+    "Normal Data/surrogate_model.pt.csv"
 ]
 
 # Optional: Custom model names (if not provided, will use directory names)
 CUSTOM_MODEL_NAMES = {
-    "Run 8 Data/normal_hier_plant_surrogate_model.pt.csv": "Hierarchical Model",
-    "Run 8 Data/normal_plant_surrogate_model.pt.csv": "Baseline Model",
+    CSV_FILES[0]: "Hierarchical Model",
 }
 
 # Output settings
@@ -260,16 +258,32 @@ def create_comparison_plots(models_data, output_dir=None):
     
     # Plot 5: Loss Distribution (Final 1000 samples)
     ax5 = axes[1, 1]
+    max_relative_error = 0
+    all_final_errors = []
+    
     for model_name, data in model_summaries.items():
         df = data['full_data']
         final_relative_errors = np.abs(df.iloc[-1000:]['pred_cost'] - df.iloc[-1000:]['true_cost']) / df.iloc[-1000:]['true_cost']
+        all_final_errors.extend(final_relative_errors.tolist())
+        max_relative_error = max(max_relative_error, final_relative_errors.max())
+        
         ax5.hist(final_relative_errors, bins=50, alpha=0.7, label=model_name, 
                 color=data['color'], density=True)
+    
+    # Set x-axis limit based on actual data range
+    # Use 95th percentile to avoid extreme outliers stretching the axis too much
+    if all_final_errors:
+        percentile_95 = np.percentile(all_final_errors, 95)
+        # Use the smaller of max error or 95th percentile, but ensure we show at least up to 0.5
+        x_limit = max(0.5, min(max_relative_error * 1.1, percentile_95 * 1.2))
+        ax5.set_xlim(0, x_limit)
+    else:
+        ax5.set_xlim(0, 1)  # Fallback if no data
+    
     ax5.set_xlabel('Relative Error')
     ax5.set_ylabel('Density')
     ax5.set_title('Relative Error Distribution (Final 1000 Samples)')
     ax5.legend()
-    ax5.set_xlim(0, 1)
     ax5.grid(True, alpha=0.3)
     
     # Plot 6: Parameter Sensitivity (if multiple parameters)
