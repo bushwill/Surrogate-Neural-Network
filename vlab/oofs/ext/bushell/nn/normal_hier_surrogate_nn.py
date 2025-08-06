@@ -325,7 +325,7 @@ if __name__ == "__main__":
     
     # initialize learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.7, patience=200, min_lr=1e-6
+        optimizer, mode='min', factor=0.9, patience=500, min_lr=1e-6
     )
 
     if os.path.exists(model_name):
