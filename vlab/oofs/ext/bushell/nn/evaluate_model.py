@@ -217,7 +217,7 @@ def create_comparison_plots(models_data, output_dir=None):
     ax2.axhline(y=0.10, color='orange', linestyle='--', alpha=0.7, label='10% Threshold')
     ax2.set_xlabel('Training Samples')
     ax2.set_ylabel('Average Relative Error')
-    ax2.set_title('Prediction Accuracy Evolution')
+    ax2.set_title('Relative Error Evolution')
     ax2.legend()
     ax2.set_yscale('log')
     ax2.grid(True, alpha=0.3)
