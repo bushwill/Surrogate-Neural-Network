@@ -17,18 +17,10 @@ from utils_nn import build_parameter_file, generate_and_evaluate_in_dir, get_nor
 from plant_comparison_nn import calculate_cost, read_real_plants
 
 # Import all surrogate model types
-from normal_surrogate_nn import PlantSurrogateNet as SimpleSurrogateNet
 try:
-    from normal_surrogate_nn import PlantSurrogateNet as NormalSurrogateNet
+    from surrogate_nn import HierarchicalPlantSurrogateNet
 except ImportError:
-    NormalSurrogateNet = None
-try:
-    from normal_boundary_surrogate_nn import PlantSurrogateNet as BoundarySurrogateNet
-except ImportError:
-    BoundarySurrogateNet = None
-try:
-    from normal_hier_surrogate_nn import HierarchicalPlantSurrogateNet
-except ImportError:
+    print("Warning: Could not import HierarchicalPlantSurrogateNet from surrogate_nn")
     HierarchicalPlantSurrogateNet = None
 
 # Customizable variables:
@@ -36,18 +28,25 @@ param_min = torch.tensor([8.0, 2.8, -110.0, -4.0, 125.0, 3.0, 0.48, 0.8, 80.0, 1
 param_max = torch.tensor([12.0, 3.2, 110.0, 4.0, 145.0, 7.0, 0.52, 1.2, 100.0, 190.0, 0.8, 0.92, 0.52])
 weight_decay = 1e-5
 num_restarts = 5
-batch_size = 16
+batch_size = 32
 diversity_amount = 0.1
 accuracy_threshold = 0.01
 boundary_penalty_weight = 0.1   # New: weight for soft boundary penalty
 
-directory = "Run 3 Data/"
+directory = "Normal Data/"
+optimizer_directory = "Optimizer/"
+
+# Create optimizer directory if it doesn't exist
+if not os.path.exists(optimizer_directory):
+    os.makedirs(optimizer_directory)
 
 surrogate_models = [
     # Format: [model_file, model_type, model_class]
-    ["normal_plant_surrogate_model.pt", "normal", NormalSurrogateNet],
-    ["normal_boundary_plant_surrogate_model.pt", "boundary", BoundarySurrogateNet],
-    ["hierarchical_plant_surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],
+    ["surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],  # Original hierarchical
+    ["test_surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],  # Your best performing model (0.003 regularization)
+    # Add your mutant models when ready for comparison
+    # ["mutant1_surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],
+    # ["mutant2_surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],
 ]
 
 for i in range(len(surrogate_models)):
@@ -100,13 +99,15 @@ def evaluate_surrogate_model(surrogate, params_batch, model_type, real_bp_batch=
     try:
         if model_type == "hierarchical":
             if real_bp_batch is not None and real_ep_batch is not None:
-                # For hierarchical model during training
+                # For hierarchical model, we need real plant data to get proper cost predictions
+                # The model was trained to compare synthetic structures to real plants
                 return surrogate(params_batch, real_bp_batch, real_ep_batch)
             else:
-                # For hierarchical model inference only
-                bp_syn, bp_probs, ep_syn, ep_probs = surrogate(params_batch)
-                # Return a dummy cost for structure-only inference
-                return torch.zeros(params_batch.size(0), 1)
+                # Fallback: structure complexity approximation (not ideal)
+                with torch.no_grad():
+                    bp_syn, bp_probs, ep_syn, ep_probs = surrogate(params_batch)
+                    structure_complexity = (bp_probs.mean(dim=-1) + ep_probs.mean(dim=-1)).mean(dim=-1, keepdim=True)
+                    return structure_complexity * 100  # Scale to reasonable cost range
         else:
             # For normal and boundary models
             return surrogate(params_batch)
@@ -152,20 +153,26 @@ real_bp_batch, real_ep_batch = prepare_real_plant_batch(real_bp, real_ep)  # For
 
 if len(sys.argv) > 1:
     try:
-        num_epochs = int(sys.argv[1])
+        num_restarts = int(sys.argv[1])
     except ValueError:
-        print("Invalid argument for number of epochs, using default 5000.")
-        num_epochs = 5000
-else:
-    num_epochs = 5000
-num_runs = num_epochs * batch_size  # total samples to process
+        print("Invalid argument for number of restarts, using default 5.")
+        
+num_runs = 1000
+
+# Track the best results across all models
+global_best_cost = float('inf')
+global_best_params = None
+global_best_model = None
 
 # Loop over each surrogate model configuration
 for model_path, model_type, model_class in surrogate_models:
     if os.path.exists(model_path):
         print(f"\nProcessing surrogate model: {model_path} (type: {model_type})")
-        optimizer_model_path = model_path.replace(".pt", "_optimizer.pt")
-        csv_file = model_path + ".csv"
+        
+        # Use optimizer directory for optimizer-related files
+        model_basename = os.path.basename(model_path)
+        optimizer_model_path = os.path.join(optimizer_directory, model_basename.replace(".pt", "_optimizer.pt"))
+        csv_file = os.path.join(optimizer_directory, model_basename + ".csv")
         
         # Setup CSV logging
         if os.path.exists(csv_file):
@@ -183,6 +190,14 @@ for model_path, model_type, model_class in surrogate_models:
             print(f"Skipping {model_path} - could not load model")
             continue
     
+        # Pre-expand real plant data for hierarchical models (needed for proper cost prediction)
+        if model_type == "hierarchical":
+            real_bp_batch_expanded = real_bp_batch.expand(batch_size, -1, -1, -1)
+            real_ep_batch_expanded = real_ep_batch.expand(batch_size, -1, -1, -1)
+        else:
+            real_bp_batch_expanded = None
+            real_ep_batch_expanded = None
+    
         best_cost = float('inf')
         best_params = None
     
@@ -195,8 +210,13 @@ for model_path, model_type, model_class in surrogate_models:
                 print(f"Starting optimizer network from scratch (restart {restart+1}/{num_restarts}).")
     
             optimizer = torch.optim.Adam(optimizer_net.parameters(), lr=1e-2, weight_decay=weight_decay)
-            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.5)
+            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=100, gamma=0.8)  # More frequent decay
             param_noise_std = 0.02
+            
+            # Early stopping variables - more aggressive for hierarchical models
+            best_loss = float('inf')
+            patience = num_runs / 8  # Reduced patience for faster stopping
+            no_improve_count = 0
 
             for step in range(num_runs):
                 optimizer.zero_grad()
@@ -213,9 +233,7 @@ for model_path, model_type, model_class in surrogate_models:
 
                 # Evaluate surrogate model based on its type
                 if model_type == "hierarchical":
-                    # Expand real plant data to match batch size
-                    real_bp_batch_expanded = real_bp_batch.expand(batch_size, -1, -1, -1)
-                    real_ep_batch_expanded = real_ep_batch.expand(batch_size, -1, -1, -1)
+                    # Hierarchical models need real plant data for proper cost predictions
                     pred_cost = evaluate_surrogate_model(surrogate, params_noisy, model_type, 
                                                        real_bp_batch_expanded, real_ep_batch_expanded)
                 else:
@@ -228,7 +246,20 @@ for model_path, model_type, model_class in surrogate_models:
                 total_loss_val.backward()
                 optimizer.step()
                 scheduler.step()
-                if step % max(1, num_runs // 100) == 0 or step == num_runs - 1:
+                
+                # Early stopping check
+                current_loss = total_loss_val.item()
+                if current_loss < best_loss:
+                    best_loss = current_loss
+                    no_improve_count = 0
+                else:
+                    no_improve_count += 1
+                
+                if no_improve_count >= patience:
+                    print(f"\nEarly stopping at step {step+1} - no improvement for {patience} steps")
+                    break
+                
+                if step % max(1, num_runs // 50) == 0 or step == num_runs - 1:  # More frequent progress updates (every ~20 steps)
                     percent = 100 * (step + 1) / num_runs
                     sys.stdout.write(f"\rRestart {restart+1}/{num_restarts} - Progress: {percent:.1f}% - surrogate cost={pred_cost.mean().item():.4f}")
                     sys.stdout.flush()
@@ -236,7 +267,7 @@ for model_path, model_type, model_class in surrogate_models:
             noise = torch.rand(1, 1)
             optimized_params = optimizer_net(noise).detach().numpy().flatten()
             print(f"\nOptimized parameters (restart {restart+1}):", optimized_params)
-            param_file = f"optimized_params_{os.path.basename(model_path).replace('.pt','')}_restart_{restart+1}.vset"
+            param_file = os.path.join(optimizer_directory, f"optimized_params_{os.path.basename(model_path).replace('.pt','')}_restart_{restart+1}.vset")
             build_parameter_file(param_file, optimized_params)
             clear_dir("temp_plant")
             real_cost = generate_and_evaluate_in_dir(param_file, real_bp, real_ep, "temp_plant", cost_fn=calculate_cost)
@@ -250,7 +281,30 @@ for model_path, model_type, model_class in surrogate_models:
     
         print(f"\nBest real cost for {model_path}: {best_cost:.4f}")
         print("Best optimized parameters:", best_params)
-        best_params_file = model_path.replace(".pt", "_optimized_params_best.vset")
+        best_params_file = os.path.join(optimizer_directory, os.path.basename(model_path).replace(".pt", "_optimized_params_best.vset"))
         build_parameter_file(best_params_file, best_params)
+        
+        # Update global best if this model performed better
+        if best_cost < global_best_cost:
+            global_best_cost = best_cost
+            global_best_params = best_params.copy()
+            global_best_model = model_path
+            
     else:
         print(f"Surrogate model not found: {model_path}")
+
+# Print overall best results across all models
+print(f"\n{'='*60}")
+print("OVERALL BEST RESULTS ACROSS ALL MODELS:")
+print(f"{'='*60}")
+if global_best_model is not None:
+    print(f"Best model: {global_best_model}")
+    print(f"Best real cost: {global_best_cost:.4f}")
+    print("Best optimized parameters:", global_best_params)
+    
+    # Save the overall best parameters
+    overall_best_file = os.path.join(optimizer_directory, "overall_best_optimized_params.vset")
+    build_parameter_file(overall_best_file, global_best_params)
+    print(f"Overall best parameters saved to: {overall_best_file}")
+else:
+    print("No models were successfully processed.")
