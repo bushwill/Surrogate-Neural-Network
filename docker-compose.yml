@@ -19,3 +19,21 @@ services:
     ports:
       - "6081:6080"
     restart: unless-stopped
+  app3:
+    container_name: mutant1
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: tail -f /dev/null
+    ports:
+      - "6082:6080"
+    restart: unless-stopped
+  app4:
+    container_name: mutant2
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: tail -f /dev/null
+    ports:
+      - "6083:6080"
+    restart: unless-stopped

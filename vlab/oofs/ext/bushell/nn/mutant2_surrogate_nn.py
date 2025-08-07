@@ -187,8 +187,12 @@ class HierarchicalPlantSurrogateNet(nn.Module):
         # Final cost aggregation
         final_cost = self.cost_aggregator(daily_costs_tensor)
         
-        # Denormalize outputs
-        return final_cost * self.output_std + self.output_mean
+        # Modified denormalization with offset to allow lower predictions
+        # Subtract a small offset before applying standard denormalization
+        offset_final_cost = final_cost - 0.1  # Small negative offset
+        denorm_cost = offset_final_cost * self.output_std + self.output_mean
+        
+        return denorm_cost
 
 def prepare_real_plant_batch(real_bp, real_ep, max_points=50):
     """Convert real plant data to fixed-size tensors for batch processing"""
