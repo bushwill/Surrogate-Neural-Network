@@ -19,12 +19,14 @@ from pathlib import Path
 # ============================================================================
 
 CSV_FILES = [
-    "Normal Data/surrogate_model.pt.csv"
+    "Normal Data/surrogate_model.pt.csv",
+    "Normal Data/test_surrogate_model.pt.csv",
 ]
 
 # Optional: Custom model names (if not provided, will use directory names)
 CUSTOM_MODEL_NAMES = {
     CSV_FILES[0]: "Hierarchical Model",
+    CSV_FILES[1]: "Mutant Model"
 }
 
 # Output settings
@@ -149,6 +151,7 @@ def group_samples(df, num_groups=None):
             'avg_pred_cost': group['pred_cost'].mean(),
             'avg_true_cost': group['true_cost'].mean(),
             'avg_relative_error': np.mean(np.abs(group['pred_cost'] - group['true_cost']) / group['true_cost']),
+            'accuracy_1pct': 100 * np.mean(np.abs(group['pred_cost'] - group['true_cost']) / group['true_cost'] < 0.01),
             'accuracy_5pct': 100 * np.mean(np.abs(group['pred_cost'] - group['true_cost']) / group['true_cost'] < 0.05),
             'accuracy_10pct': 100 * np.mean(np.abs(group['pred_cost'] - group['true_cost']) / group['true_cost'] < 0.10),
             'sample_count': len(group)
@@ -213,6 +216,7 @@ def create_comparison_plots(models_data, output_dir=None):
         grouped_df = data['grouped_data']
         ax2.plot(grouped_df['end_sample'], grouped_df['avg_relative_error'], 
                 label=model_name, color=data['color'], linewidth=2)
+    ax2.axhline(y=0.01, color='green', linestyle='--', alpha=0.7, label='1% Threshold')
     ax2.axhline(y=0.05, color='red', linestyle='--', alpha=0.7, label='5% Threshold')
     ax2.axhline(y=0.10, color='orange', linestyle='--', alpha=0.7, label='10% Threshold')
     ax2.set_xlabel('Training Samples')
@@ -235,11 +239,15 @@ def create_comparison_plots(models_data, output_dir=None):
     ax3.grid(True, alpha=0.3)
     ax3.set_ylim(0, 100)
     
-    # Plot 4: Predicted vs True Cost (Final 1000 samples)
+    # Plot 4: Predicted vs True Cost (Final Group)
     ax4 = axes[1, 0]
     for model_name, data in model_summaries.items():
         df = data['full_data']
-        final_samples = df.iloc[-1000:]  # Last 1000 samples
+        grouped_df = data['grouped_data']
+        # Use the final group from grouped data for consistency
+        final_group_start = int(grouped_df.iloc[-1]['start_sample']) - 1  # Convert to 0-based indexing
+        final_group_end = int(grouped_df.iloc[-1]['end_sample'])
+        final_samples = df.iloc[final_group_start:final_group_end]
         ax4.scatter(final_samples['true_cost'], final_samples['pred_cost'], 
                    alpha=0.6, s=10, label=model_name, color=data['color'])
     
@@ -252,18 +260,22 @@ def create_comparison_plots(models_data, output_dir=None):
     
     ax4.set_xlabel('True Cost')
     ax4.set_ylabel('Predicted Cost')
-    ax4.set_title('Predicted vs True Cost (Final 1000 Samples)')
+    ax4.set_title(f'Predicted vs True Cost (Final Group)')
     ax4.legend()
     ax4.grid(True, alpha=0.3)
     
-    # Plot 5: Loss Distribution (Final 1000 samples)
+    # Plot 5: Loss Distribution (Final Group)
     ax5 = axes[1, 1]
     max_relative_error = 0
     all_final_errors = []
     
     for model_name, data in model_summaries.items():
         df = data['full_data']
-        final_relative_errors = np.abs(df.iloc[-1000:]['pred_cost'] - df.iloc[-1000:]['true_cost']) / df.iloc[-1000:]['true_cost']
+        grouped_df = data['grouped_data']
+        # Use the final group from grouped data for consistency
+        final_group_start = int(grouped_df.iloc[-1]['start_sample']) - 1  # Convert to 0-based indexing
+        final_group_end = int(grouped_df.iloc[-1]['end_sample'])
+        final_relative_errors = np.abs(df.iloc[final_group_start:final_group_end]['pred_cost'] - df.iloc[final_group_start:final_group_end]['true_cost']) / df.iloc[final_group_start:final_group_end]['true_cost']
         all_final_errors.extend(final_relative_errors.tolist())
         max_relative_error = max(max_relative_error, final_relative_errors.max())
         
@@ -282,7 +294,7 @@ def create_comparison_plots(models_data, output_dir=None):
     
     ax5.set_xlabel('Relative Error')
     ax5.set_ylabel('Density')
-    ax5.set_title('Relative Error Distribution (Final 1000 Samples)')
+    ax5.set_title(f'Relative Error Distribution (Final Group)')
     ax5.legend()
     ax5.grid(True, alpha=0.3)
     
@@ -304,10 +316,27 @@ def create_comparison_plots(models_data, output_dir=None):
         else:
             ax6.text(0.5, 0.5, 'No parameter data available', ha='center', va='center', transform=ax6.transAxes)
     else:
-        # Multiple models: show final performance comparison
+        # Multiple models: show final performance comparison using final group
         model_names = list(model_summaries.keys())
-        final_accuracies = [data['grouped_data']['accuracy_5pct'].iloc[-1] for data in model_summaries.values()]
-        final_rel_errors = [data['grouped_data']['avg_relative_error'].iloc[-1] for data in model_summaries.values()]
+        final_accuracies = []
+        final_rel_errors = []
+        
+        for data in model_summaries.values():
+            df = data['full_data']
+            grouped_df = data['grouped_data']
+            # Use the final group from grouped data for consistency
+            final_group_start = int(grouped_df.iloc[-1]['start_sample']) - 1  # Convert to 0-based indexing
+            final_group_end = int(grouped_df.iloc[-1]['end_sample'])
+            final_samples = df.iloc[final_group_start:final_group_end]
+            
+            # Calculate metrics for final group
+            relative_errors = np.abs(final_samples['pred_cost'] - final_samples['true_cost']) / final_samples['true_cost']
+            accuracy_1pct = 100 * np.mean(relative_errors < 0.01)
+            accuracy_5pct = 100 * np.mean(relative_errors < 0.05)
+            avg_rel_error = np.mean(relative_errors)
+            
+            final_accuracies.append(accuracy_5pct)
+            final_rel_errors.append(avg_rel_error)
         
         x = np.arange(len(model_names))
         width = 0.35
@@ -319,7 +348,7 @@ def create_comparison_plots(models_data, output_dir=None):
         ax6.set_xlabel('Model')
         ax6.set_ylabel('Accuracy < 5% (%)', color='blue')
         ax6_twin.set_ylabel('Relative Error', color='red')
-        ax6.set_title('Final Performance Comparison')
+        ax6.set_title('Final Performance Comparison (Final Group)')
         ax6.set_xticks(x)
         ax6.set_xticklabels(model_names, rotation=45, ha='right')
         ax6.grid(True, alpha=0.3)
@@ -345,9 +374,13 @@ def generate_performance_table(model_summaries, output_dir=None):
         df = data['full_data']
         grouped_df = data['grouped_data']
         
-        # Calculate comprehensive metrics
-        relative_errors = np.abs(df['pred_cost'] - df['true_cost']) / df['true_cost']
-        final_1000_relative_errors = relative_errors.iloc[-min(1000, len(relative_errors)):]
+        # Use the final group from grouped data to ensure consistency
+        # This is the same data used in plots and final accuracy calculations
+        final_group_start = int(grouped_df.iloc[-1]['start_sample']) - 1  # Convert to 0-based indexing
+        final_group_end = int(grouped_df.iloc[-1]['end_sample'])
+        final_samples = df.iloc[final_group_start:final_group_end]
+        
+        relative_errors = np.abs(final_samples['pred_cost'] - final_samples['true_cost']) / final_samples['true_cost']
         
         # Check if cost_loss column exists
         if 'cost_loss' in grouped_df.columns:
@@ -362,12 +395,13 @@ def generate_performance_table(model_summaries, output_dir=None):
             'Training Samples': f"{len(df):,}",
             'Final Cost Loss': f"{final_cost_loss:.6f}",
             'Final Relative Error': f"{grouped_df['avg_relative_error'].iloc[-1]:.4f}",
+            'Final Accuracy < 1%': f"{grouped_df['accuracy_1pct'].iloc[-1]:.1f}%",
             'Final Accuracy < 5%': f"{grouped_df['accuracy_5pct'].iloc[-1]:.1f}%",
             'Final Accuracy < 10%': f"{grouped_df['accuracy_10pct'].iloc[-1]:.1f}%",
-            'Mean Relative Error': f"{np.mean(final_1000_relative_errors):.4f}",
-            'Median Relative Error': f"{np.median(final_1000_relative_errors):.4f}",
-            'Std Relative Error': f"{np.std(final_1000_relative_errors):.4f}",
-            'R² Score': f"{stats.pearsonr(df['pred_cost'], df['true_cost'])[0]**2:.4f}",
+            'Mean Relative Error': f"{np.mean(relative_errors):.4f}",
+            'Median Relative Error': f"{np.median(relative_errors):.4f}",
+            'Std Relative Error': f"{np.std(relative_errors):.4f}",
+            'R² Score': f"{stats.pearsonr(final_samples['pred_cost'], final_samples['true_cost'])[0]**2:.4f}",
             'Convergence Stability': f"{cost_loss_stability:.6f}"
         }
         
