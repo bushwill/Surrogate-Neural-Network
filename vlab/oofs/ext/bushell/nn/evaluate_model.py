@@ -19,14 +19,18 @@ from pathlib import Path
 # ============================================================================
 
 CSV_FILES = [
-    "Normal Data/surrogate_model.pt.csv",
-    "Normal Data/test_surrogate_model.pt.csv",
+    "Normal Data/08-08-25 Run/surrogate_model1.pt.csv",
+    "Normal Data/08-08-25 Run/surrogate_model2.pt.csv",
+    "Normal Data/08-08-25 Run/mutant1_surrogate_model.pt.csv",
+    "Normal Data/08-08-25 Run/mutant2_surrogate_model.pt.csv",
 ]
 
 # Optional: Custom model names (if not provided, will use directory names)
 CUSTOM_MODEL_NAMES = {
-    CSV_FILES[0]: "Hierarchical Model",
-    CSV_FILES[1]: "Mutant Model"
+    CSV_FILES[0]: "Base Model 1",
+    CSV_FILES[1]: "Base Model 2",
+    CSV_FILES[2]: "Mutant Model 1",
+    CSV_FILES[3]: "Mutant Model 2",
 }
 
 # Output settings
