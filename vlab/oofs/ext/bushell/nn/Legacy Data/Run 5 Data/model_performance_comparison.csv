@@ -1,0 +1,2 @@
+Model,Training Samples,Final Cost Loss,Final Relative Error,Final Accuracy < 1%,Final Accuracy < 5%,Final Accuracy < 10%,Mean Relative Error,Median Relative Error,Std Relative Error,R² Score,Convergence Stability
+normal_hier_plant_surrogate_model.pt,"148,000",0.072809,0.0728,14.5%,48.1%,69.3%,0.0728,0.0545,0.0625,0.6650,0.001464

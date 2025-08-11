@@ -1,0 +1,6 @@
+Model,Training Samples,Final Cost Loss,Final Relative Error,Final Accuracy < 1%,Final Accuracy < 5%,Final Accuracy < 10%,Mean Relative Error,Median Relative Error,Std Relative Error,R² Score,Convergence Stability
+boundary_batch_32_plant_surrogate_model.pt,"86,400",0.011993,0.0120,60.1%,97.7%,100.0%,0.0120,0.0068,0.0136,0.9672,0.000458
+boundary_batch_16_plant_surrogate_model.pt,"86,400",0.010620,0.0106,64.8%,98.4%,100.0%,0.0106,0.0058,0.0123,0.9767,0.000628
+batch_16_plant_surrogate_model.pt,"86,400",0.012008,0.0120,55.1%,99.1%,100.0%,0.0120,0.0085,0.0113,0.9778,0.000495
+batch_32_plant_surrogate_model.pt,"86,400",0.012924,0.0129,51.6%,98.4%,100.0%,0.0129,0.0096,0.0121,0.9761,0.000551
+simple_plant_surrogate_model.pt,"86,400",0.054794,0.0548,12.6%,55.7%,84.7%,0.0548,0.0437,0.0433,0.5813,0.000990
