@@ -19,10 +19,10 @@ from pathlib import Path
 # ============================================================================
 
 CSV_FILES = [
-    "Normal Data/08-08-25 Run/surrogate_model1.pt.csv",
-    "Normal Data/08-08-25 Run/surrogate_model2.pt.csv",
-    "Normal Data/08-08-25 Run/mutant1_surrogate_model.pt.csv",
-    "Normal Data/08-08-25 Run/mutant2_surrogate_model.pt.csv",
+    "Normal Data/08-11-25 Run/surrogate_model1.pt.csv",
+    "Normal Data/08-11-25 Run/surrogate_model2.pt.csv",
+    "Normal Data/08-11-25 Run/mutant1_surrogate_model.pt.csv",
+    "Normal Data/08-11-25 Run/mutant2_surrogate_model.pt.csv",
 ]
 
 # Optional: Custom model names (if not provided, will use directory names)
@@ -34,7 +34,7 @@ CUSTOM_MODEL_NAMES = {
 }
 
 # Output settings
-OUTPUT_DIRECTORY = "evaluation_results"
+OUTPUT_DIRECTORY = "Normal Data/08-11-25 Run"
 NUM_GROUPS = 100  # Number of groups to divide samples into
 
 def load_and_process_csvs(csv_paths=None, custom_names=None):
@@ -420,8 +420,8 @@ def generate_performance_table(model_summaries, output_dir=None):
     
     # Save detailed results
     results_df = pd.DataFrame(performance_data)
-    results_df.to_csv(f'{output_dir}/performance_comparison.csv', index=False)
-    
+    results_df.to_csv(f'{output_dir}/model_performance_comparison.csv', index=False)
+
     return results_df
 
 def main():
@@ -464,7 +464,7 @@ def main():
     
     print(f"\nResults saved to {output_dir}/")
     print("- model_comparison.png: Comprehensive comparison plots")
-    print("- performance_comparison.csv: Detailed metrics table")
+    print("- model_performance_comparison.csv: Detailed metrics table")
 
 def run_evaluation():
     """Simplified function to run evaluation with script configuration"""
@@ -490,7 +490,7 @@ def run_evaluation():
     
     print(f"\nResults saved to {OUTPUT_DIRECTORY}/")
     print("- model_comparison.png: Comprehensive comparison plots")
-    print("- performance_comparison.csv: Detailed metrics table")
+    print("- model_performance_comparison.csv: Detailed metrics table")
     
     return results_df
 
