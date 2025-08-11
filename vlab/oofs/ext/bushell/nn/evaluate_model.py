@@ -14,28 +14,37 @@ import os
 import argparse
 from pathlib import Path
 
+
 # ============================================================================
-# CONFIGURATION: Edit this list to specify which CSV files to compare
+# CONFIGURATION: Set the directory to scan for CSV files
 # ============================================================================
 
-DIRECTORY = "Normal Data/08-08-25 Run/"
-CSV_FILES = [
-    DIRECTORY + "surrogate_model1.pt.csv",
-    DIRECTORY + "surrogate_model2.pt.csv",
-    DIRECTORY + "mutant1_surrogate_model.pt.csv",
-    DIRECTORY + "mutant2_surrogate_model.pt.csv",
-]
+CSV_DIRECTORY = "Normal Data/08-08-25 Run"
+
+def get_all_csv_files(directory):
+    """Return a list of all CSV files in the given directory (non-recursive)."""
+    return [str(f) for f in Path(directory).glob("*.csv")]
+
+CSV_FILES = get_all_csv_files(CSV_DIRECTORY)
 
 # Optional: Custom model names (if not provided, will use directory names)
-CUSTOM_MODEL_NAMES = {
-    CSV_FILES[0]: "Base Model 1",
-    CSV_FILES[1]: "Base Model 2",
-    CSV_FILES[2]: "Mutant Model 1",
-    CSV_FILES[3]: "Mutant Model 2",
-}
+CUSTOM_MODEL_NAMES = {}
+for csv_path in CSV_FILES:
+    stem = Path(csv_path).stem
+    # Example: map known file names to pretty names, else use stem
+    if "mutant1" in stem:
+        CUSTOM_MODEL_NAMES[csv_path] = "Mutant Model 1"
+    elif "mutant2" in stem:
+        CUSTOM_MODEL_NAMES[csv_path] = "Mutant Model 2"
+    elif "surrogate_model1" in stem:
+        CUSTOM_MODEL_NAMES[csv_path] = "Base Model 1"
+    elif "surrogate_model2" in stem:
+        CUSTOM_MODEL_NAMES[csv_path] = "Base Model 2"
+    else:
+        CUSTOM_MODEL_NAMES[csv_path] = stem
 
 # Output settings
-OUTPUT_DIRECTORY = DIRECTORY
+OUTPUT_DIRECTORY = CSV_DIRECTORY
 NUM_GROUPS = 100  # Number of groups to divide samples into
 
 def load_and_process_csvs(csv_paths=None, custom_names=None):
