@@ -1,5 +1,5 @@
 Model,Training Samples,Final Cost Loss,Final Relative Error,Final Accuracy < 1%,Final Accuracy < 5%,Final Accuracy < 10%,Mean Relative Error,Median Relative Error,Std Relative Error,R² Score,Convergence Stability
-Base Model 1,"40,000",0.024940,0.0249,33.5%,85.2%,97.8%,0.0249,0.0159,0.0252,0.8997,0.001675
 Base Model 2,"40,000",0.023507,0.0235,32.8%,86.8%,99.5%,0.0235,0.0164,0.0216,0.9273,0.000941
-Mutant Model 1,"40,000",0.027220,0.0272,31.0%,85.8%,97.0%,0.0272,0.0180,0.0280,0.8859,0.001414
+Base Model 1,"40,000",0.024940,0.0249,33.5%,85.2%,97.8%,0.0249,0.0159,0.0252,0.8997,0.001675
 Mutant Model 2,"40,000",0.027351,0.0274,26.5%,83.2%,99.2%,0.0274,0.0206,0.0238,0.9059,0.001303
+Mutant Model 1,"40,000",0.027220,0.0272,31.0%,85.8%,97.0%,0.0272,0.0180,0.0280,0.8859,0.001414
