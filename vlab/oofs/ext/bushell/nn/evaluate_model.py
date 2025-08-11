@@ -18,11 +18,12 @@ from pathlib import Path
 # CONFIGURATION: Edit this list to specify which CSV files to compare
 # ============================================================================
 
+DIRECTORY = "Normal Data/08-08-25 Run/"
 CSV_FILES = [
-    "Normal Data/08-11-25 Run/surrogate_model1.pt.csv",
-    "Normal Data/08-11-25 Run/surrogate_model2.pt.csv",
-    "Normal Data/08-11-25 Run/mutant1_surrogate_model.pt.csv",
-    "Normal Data/08-11-25 Run/mutant2_surrogate_model.pt.csv",
+    DIRECTORY + "surrogate_model1.pt.csv",
+    DIRECTORY + "surrogate_model2.pt.csv",
+    DIRECTORY + "mutant1_surrogate_model.pt.csv",
+    DIRECTORY + "mutant2_surrogate_model.pt.csv",
 ]
 
 # Optional: Custom model names (if not provided, will use directory names)
@@ -34,7 +35,7 @@ CUSTOM_MODEL_NAMES = {
 }
 
 # Output settings
-OUTPUT_DIRECTORY = "Normal Data/08-11-25 Run"
+OUTPUT_DIRECTORY = DIRECTORY
 NUM_GROUPS = 100  # Number of groups to divide samples into
 
 def load_and_process_csvs(csv_paths=None, custom_names=None):
