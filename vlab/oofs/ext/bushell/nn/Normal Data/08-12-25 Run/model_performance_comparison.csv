@@ -1,0 +1,2 @@
+Model,Training Samples,Final Cost Loss,Final Relative Error,Final Accuracy < 1%,Final Accuracy < 5%,Final Accuracy < 10%,Mean Relative Error,Median Relative Error,Std Relative Error,R² Score,Convergence Stability
+batch_16_plant_surrogate_model.pt,"28,000",0.014141,0.0141,47.9%,98.9%,100.0%,0.0141,0.0108,0.0118,0.9753,0.000851

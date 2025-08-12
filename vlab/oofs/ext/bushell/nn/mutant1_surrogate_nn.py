@@ -246,6 +246,21 @@ def hierarchical_loss_function(pred_cost, true_cost, bp_syn, bp_probs, ep_syn, e
 
 
 if __name__ == "__main__":
+    # Initialize training statistics and learning rate schedule variables
+    rel_error_history = []
+    avg_loss_change_history = []
+    lr_patience = 100  # Check every N samples for adaptation
+    lr_decay_threshold = 0.1
+    lr_min = 1e-6
+    lr_decay_factor = 0.95
+    start_time = time.time()
+    # Initialize model and optimizer, and load real plant data
+    model = HierarchicalPlantSurrogateNet()
+    initial_lr = 1e-4  # Lower learning rate for more complex model
+    optimizer = torch.optim.Adam(model.parameters(), lr=initial_lr)
+    print("Reading real plants...")
+    real_bp, real_ep = read_real_plants()
+    real_bp_batch, real_ep_batch = prepare_real_plant_batch(real_bp, real_ep)
     import time
     
     # Get number of runs from command line, default to 1000
@@ -261,51 +276,28 @@ if __name__ == "__main__":
     # Setup training CSV and get previous state
     start_run, prev_losses, csv_file = setup_training_csv(model_name)
             
-    model = HierarchicalPlantSurrogateNet()
-    initial_lr = 1e-4  # Lower learning rate for more complex model
-    optimizer = torch.optim.Adam(model.parameters(), lr=initial_lr)
-    
-    # Adaptive learning rate parameters
-    lr_decay_factor = 0.95
-    lr_decay_threshold = 0.1  # Decay when relative error drops below this
-    lr_min = 1e-6  # Minimum learning rate
-    lr_patience = 100  # Check every N samples for adaptation
-
-    # Always load if exists, but always train
-    if os.path.exists(model_name):
-        try:
-            model.load_state_dict(torch.load(model_name))
-            print(f"Loaded existing model from {model_name}")
-        except Exception as e:
-            print(f"Could not load existing model: {e}. Creating new model.")
-    else:
-        print(f"No existing model found at {model_name}, creating new model.")
-    
-    model.train()
-    print("Reading real plants...")
-    real_bp, real_ep = read_real_plants()
-    real_bp_batch, real_ep_batch = prepare_real_plant_batch(real_bp, real_ep)
-    print(f"Starting hierarchical training with {num_runs} plants...")
-    
-    total_loss = sum(prev_losses)
-    total_samples = len(prev_losses)
-    avg_loss_change_history = []
-    rel_error_history = []
-
-    start_time = time.time()
-
+    batch_size = 16
+    batch_params = []
+    batch_true_costs = []
+    batch_pred_costs = []
+    batch_bp_syn = []
+    batch_bp_probs = []
+    batch_ep_syn = []
+    batch_ep_probs = []
+    batch_total_loss_vals = []
+    batch_cost_losses = []
+    batch_count_losses = []
+    batch_coord_regs = []
+    batch_params_for_csv = []
+    batch_pred_cost_vals = []
+    batch_true_cost_vals = []
     for idx in range(num_runs):
-        iter_start_time = time.time()
-        clear_surrogate_dir()
-        
         # 1. Generate random parameters and write to file
         params = build_random_parameter_file("surrogate_params.vset")
         params_tensor = torch.tensor(params, dtype=torch.float32).unsqueeze(0)
-        
         # 2. Get true cost from L-system
         true_cost = generate_and_evaluate("surrogate_params.vset", real_bp, real_ep)
         true_cost_tensor = torch.tensor([[true_cost]], dtype=torch.float32)
-        
         # 3. Forward pass through hierarchical model
         try:
             pred_cost = model(params_tensor, real_bp_batch, real_ep_batch)
@@ -314,7 +306,6 @@ if __name__ == "__main__":
             print(f"params_tensor shape: {params_tensor.shape}")
             print(f"real_bp_batch shape: {real_bp_batch.shape}")
             print(f"real_ep_batch shape: {real_ep_batch.shape}")
-            
             # Check structure generation output
             with torch.no_grad():
                 params_norm = (params_tensor - model.input_mean) / model.input_std
@@ -322,42 +313,102 @@ if __name__ == "__main__":
                 print(f"bp_syn shape: {bp_syn.shape}")
                 print(f"ep_syn shape: {ep_syn.shape}")
             raise e
-        
         # Get intermediate outputs for loss computation
         bp_syn, bp_probs, ep_syn, ep_probs = model.structure_gen(params_tensor)
-        
         # 4. Compute hierarchical loss
         total_loss_val, cost_loss, count_loss, coord_reg = hierarchical_loss_function(
             pred_cost, true_cost_tensor, bp_syn, bp_probs, ep_syn, ep_probs, real_bp, real_ep
         )
-        
-        # 5. Backpropagation
-        optimizer.zero_grad()
-        total_loss_val.backward()
-        optimizer.step()
-        
-        # 6. Update statistics
-        total_loss += cost_loss.item()  # Track only cost loss for comparison
-        total_samples += 1
-        avg_loss = total_loss / total_samples
-        timestamp = t.strftime("%Y-%m-%d %H:%M:%S")
-        
-        if total_samples > 1:
-            prev_avg_loss = (total_loss - cost_loss.item()) / (total_samples - 1)
-            avg_loss_change = avg_loss - prev_avg_loss
-        else:
-            avg_loss_change = 0.0
-            
-        avg_loss_change_history.append(avg_loss_change)
-        if len(avg_loss_change_history) > 1000:
-            avg_loss_change_history.pop(0)
-        avg_loss_change_1000 = sum(avg_loss_change_history) / len(avg_loss_change_history)
-        
-        # Compute relative error
-        pred_cost_val = pred_cost.item()
-        rel_error = abs(pred_cost_val - true_cost) / (abs(true_cost) + 1e-8)
-        rel_error_history.append(rel_error)
-        if len(rel_error_history) > 1000:
+        # Accumulate batch
+        batch_params.append(params_tensor)
+        batch_true_costs.append(true_cost_tensor)
+        batch_pred_costs.append(pred_cost)
+        batch_bp_syn.append(bp_syn)
+        batch_bp_probs.append(bp_probs)
+        batch_ep_syn.append(ep_syn)
+        batch_ep_probs.append(ep_probs)
+        batch_total_loss_vals.append(total_loss_val)
+        batch_cost_losses.append(cost_loss)
+        batch_count_losses.append(count_loss)
+        batch_coord_regs.append(coord_reg)
+        batch_params_for_csv.append(params)
+        batch_pred_cost_vals.append(pred_cost.item())
+        batch_true_cost_vals.append(true_cost)
+        # If batch is full or last sample, update model
+        if (len(batch_params) == batch_size) or (idx == num_runs - 1):
+            params_batch_tensor = torch.cat(batch_params, dim=0)
+            true_costs_batch_tensor = torch.cat(batch_true_costs, dim=0)
+            # Forward pass for batch
+            pred_costs_batch = model(params_batch_tensor, real_bp_batch, real_ep_batch)
+            # For loss, use batch mean
+            bp_syn_batch = torch.cat(batch_bp_syn, dim=0)
+            bp_probs_batch = torch.cat(batch_bp_probs, dim=0)
+            ep_syn_batch = torch.cat(batch_ep_syn, dim=0)
+            ep_probs_batch = torch.cat(batch_ep_probs, dim=0)
+            total_loss_val_batch, cost_loss_batch, count_loss_batch, coord_reg_batch = hierarchical_loss_function(
+                pred_costs_batch, true_costs_batch_tensor, bp_syn_batch, bp_probs_batch, ep_syn_batch, ep_probs_batch, real_bp, real_ep
+            )
+            optimizer.zero_grad()
+            total_loss_val_batch.backward()
+            optimizer.step()
+            # Update statistics for each sample in batch
+            for b in range(len(batch_params)):
+                total_loss += batch_cost_losses[b].item()
+                total_samples += 1
+                avg_loss = total_loss / total_samples
+                timestamp = t.strftime("%Y-%m-%d %H:%M:%S")
+                if total_samples > 1:
+                    prev_avg_loss = (total_loss - batch_cost_losses[b].item()) / (total_samples - 1)
+                    avg_loss_change = avg_loss - prev_avg_loss
+                else:
+                    avg_loss_change = 0.0
+                avg_loss_change_history.append(avg_loss_change)
+                if len(avg_loss_change_history) > 1000:
+                    avg_loss_change_history.pop(0)
+                avg_loss_change_1000 = sum(avg_loss_change_history) / len(avg_loss_change_history)
+                pred_cost_val = batch_pred_cost_vals[b]
+                true_cost_val = batch_true_cost_vals[b]
+                rel_error = abs(pred_cost_val - true_cost_val) / (abs(true_cost_val) + 1e-8)
+                rel_error_history.append(rel_error)
+                if len(rel_error_history) > 1000:
+                    rel_error_history.pop(0)
+                accuracy_1000 = 100.0 * sum(e < accuracy_threshold for e in rel_error_history) / len(rel_error_history)
+                current_lr = optimizer.param_groups[0]['lr']
+                if total_samples % lr_patience == 0 and total_samples > 1000:
+                    avg_rel_error_1000 = sum(rel_error_history) / len(rel_error_history)
+                    if avg_rel_error_1000 < lr_decay_threshold and current_lr > lr_min:
+                        new_lr = max(current_lr * lr_decay_factor, lr_min)
+                        for param_group in optimizer.param_groups:
+                            param_group['lr'] = new_lr
+                        print(f"\nLearning rate adapted: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
+                    elif avg_rel_error_1000 > 0.2 and current_lr < initial_lr:
+                        new_lr = min(current_lr / lr_decay_factor, initial_lr)
+                        for param_group in optimizer.param_groups:
+                            param_group['lr'] = new_lr
+                        print(f"\nLearning rate increased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
+                print_training_progress(idx, num_runs, start_run, avg_loss, batch_total_loss_vals[b].item(), 
+                                       batch_cost_losses[b].item(), accuracy_1000, current_lr, start_time,
+                                       rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost_val)
+                clear_surrogate_dir()
+                run_number = start_run + idx - len(batch_params) + b + 2
+                log_training_step(csv_file, run_number, batch_total_loss_vals[b].item(), batch_cost_losses[b].item(), 
+                                 batch_coord_regs[b].item(), batch_pred_cost_vals[b], batch_true_cost_vals[b], batch_params_for_csv[b], 
+                                 avg_loss, avg_loss_change)
+            # Reset batch
+            batch_params = []
+            batch_true_costs = []
+            batch_pred_costs = []
+            batch_bp_syn = []
+            batch_bp_probs = []
+            batch_ep_syn = []
+            batch_ep_probs = []
+            batch_total_loss_vals = []
+            batch_cost_losses = []
+            batch_count_losses = []
+            batch_coord_regs = []
+            batch_params_for_csv = []
+            batch_pred_cost_vals = []
+            batch_true_cost_vals = []
             rel_error_history.pop(0)
             
         # Accuracy: percent of rel_error < 0.1 in last 1000 samples
