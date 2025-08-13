@@ -10,7 +10,7 @@ import numpy as np
 from plant_comparison_nn import read_real_plants
 from utils_nn import build_random_parameter_file, generate_and_evaluate
 
-model_name = "batch_16_plant_surrogate_model.pt"
+model_name = "benchmark_surrogate_model.pt"
 accuracy_threshold = 0.01
 batch_size = 16
 

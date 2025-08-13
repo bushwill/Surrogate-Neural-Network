@@ -265,11 +265,7 @@ if __name__ == "__main__":
     initial_lr = 1e-4  # Lower learning rate for more complex model
     optimizer = torch.optim.Adam(model.parameters(), lr=initial_lr)
     
-    # Adaptive learning rate parameters
-    lr_decay_factor = 0.95
-    lr_decay_threshold = 0.1  # Decay when relative error drops below this
-    lr_min = 1e-6  # Minimum learning rate
-    lr_patience = 100  # Check every N samples for adaptation
+        # Learning rate remains constant for all training
 
     # Always load if exists, but always train
     if os.path.exists(model_name):
@@ -363,24 +359,8 @@ if __name__ == "__main__":
         # Accuracy: percent of rel_error < 0.1 in last 1000 samples
         accuracy_1000 = 100.0 * sum(e < accuracy_threshold for e in rel_error_history) / len(rel_error_history)
         
-        # Adaptive learning rate adjustment
+        # Learning rate remains constant; no adaptation
         current_lr = optimizer.param_groups[0]['lr']
-        if total_samples % lr_patience == 0 and total_samples > 1000:  # Check every lr_patience samples after warmup
-            avg_rel_error_1000 = sum(rel_error_history) / len(rel_error_history)
-            
-            # Decay learning rate if model is performing well
-            if avg_rel_error_1000 < lr_decay_threshold and current_lr > lr_min:
-                new_lr = max(current_lr * lr_decay_factor, lr_min)
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = new_lr
-                print(f"\nLearning rate adapted: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
-            
-            # Increase learning rate if model is struggling (relative error > 0.2)
-            elif avg_rel_error_1000 > 0.2 and current_lr < initial_lr:
-                new_lr = min(current_lr / lr_decay_factor, initial_lr)
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = new_lr
-                print(f"\nLearning rate increased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
         
         # Print progress with meaningful metrics
         print_training_progress(idx, num_runs, start_run, avg_loss, total_loss_val.item(), 

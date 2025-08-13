@@ -42,7 +42,7 @@ if not os.path.exists(optimizer_directory):
 
 surrogate_models = [
     # Format: [model_file, model_type, model_class]
-    ["surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],  # Original hierarchical
+    ["Normal Data/Best Models/surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],  # Original hierarchical
     ["test_surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],  # Your best performing model (0.003 regularization)
     # Add your mutant models when ready for comparison
     # ["mutant1_surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],
