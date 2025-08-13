@@ -411,7 +411,7 @@ if __name__ == "__main__":
                         for param_group in optimizer.param_groups:
                             param_group['lr'] = new_lr
                         print(f"\nLearning rate increased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
-                print_training_progress(idx, num_runs, start_run, avg_loss, batch_total_loss_vals[b].item(), 
+                print_training_progress(total_samples, num_runs, start_run, avg_loss, batch_total_loss_vals[b].item(), 
                                        batch_cost_losses[b].item(), accuracy_1000, current_lr, start_time,
                                        rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost_val)
                 clear_surrogate_dir()
@@ -469,9 +469,9 @@ if __name__ == "__main__":
                 print(f"\nLearning rate increased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
 
         # Print progress with meaningful metrics
-        print_training_progress(idx, num_runs, start_run, avg_loss, total_loss_val.item(),
-                               cost_loss.item(), accuracy_1000, current_lr, start_time,
-                               rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost_val)
+        print_training_progress(total_samples, num_runs, start_run, avg_loss, total_loss_val.item(),
+                   cost_loss.item(), accuracy_1000, current_lr, start_time,
+                   rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost_val)
 
         clear_surrogate_dir()
 
