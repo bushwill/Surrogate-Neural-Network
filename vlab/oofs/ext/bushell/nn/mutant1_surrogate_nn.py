@@ -101,21 +101,24 @@ class HungarianAssignmentNet(nn.Module):
         
     def forward(self, bp_syn, ep_syn, bp_real, ep_real):
         batch_size = bp_syn.size(0)
-        
+        # Ensure all tensors are the same batch size
+        assert ep_syn.size(0) == batch_size and bp_real.size(0) == batch_size and ep_real.size(0) == batch_size, "Batch size mismatch in HungarianAssignmentNet input."
+        # Ensure all tensors have the same number of points
+        assert bp_syn.size(1) == self.max_points and ep_syn.size(1) == self.max_points, "max_points mismatch in synthetic points."
+        assert bp_real.size(1) == self.max_points and ep_real.size(1) == self.max_points, "max_points mismatch in real points."
+        # Ensure all tensors have 2 coordinates in last dim
+        assert bp_syn.size(2) == 2 and ep_syn.size(2) == 2 and bp_real.size(2) == 2 and ep_real.size(2) == 2, "Coordinate dimension mismatch."
         # Flatten and concatenate structures
         structure_features = torch.cat([
-            bp_syn.view(batch_size, -1),
-            ep_syn.view(batch_size, -1),
-            bp_real.view(batch_size, -1),
-            ep_real.view(batch_size, -1)
+            bp_syn.reshape(batch_size, -1),
+            ep_syn.reshape(batch_size, -1),
+            bp_real.reshape(batch_size, -1),
+            ep_real.reshape(batch_size, -1)
         ], dim=1)
-        
         encoded = self.structure_encoder(structure_features)
-        
         # Predict assignment matrix and total cost
         assignment_weights = self.assignment_net(encoded).view(batch_size, self.max_points, self.max_points)
         total_cost = self.cost_net(encoded)
-        
         return assignment_weights, total_cost
 
 class CostAggregationNet(nn.Module):
@@ -253,7 +256,11 @@ if __name__ == "__main__":
     lr_decay_threshold = 0.1
     lr_min = 1e-6
     lr_decay_factor = 0.95
-    start_time = time.time()
+    start_time = t.time()
+    total_samples = 0
+    total_loss = 0.0
+    avg_loss = 0.0
+    avg_loss_change = 0.0
     # Initialize model and optimizer, and load real plant data
     model = HierarchicalPlantSurrogateNet()
     initial_lr = 1e-4  # Lower learning rate for more complex model
@@ -261,7 +268,6 @@ if __name__ == "__main__":
     print("Reading real plants...")
     real_bp, real_ep = read_real_plants()
     real_bp_batch, real_ep_batch = prepare_real_plant_batch(real_bp, real_ep)
-    import time
     
     # Get number of runs from command line, default to 1000
     if len(sys.argv) > 1:
@@ -338,13 +344,32 @@ if __name__ == "__main__":
         if (len(batch_params) == batch_size) or (idx == num_runs - 1):
             params_batch_tensor = torch.cat(batch_params, dim=0)
             true_costs_batch_tensor = torch.cat(batch_true_costs, dim=0)
+            # Ensure correct shape for params_batch_tensor
+            if params_batch_tensor.dim() == 3 and params_batch_tensor.size(1) == 1:
+                params_batch_tensor = params_batch_tensor.squeeze(1)
+            # Expand real_bp_batch and real_ep_batch to match batch size if needed
+            if real_bp_batch.size(0) == 1 and params_batch_tensor.size(0) > 1:
+                real_bp_batch_exp = real_bp_batch.expand(params_batch_tensor.size(0), -1, -1, -1)
+                real_ep_batch_exp = real_ep_batch.expand(params_batch_tensor.size(0), -1, -1, -1)
+            else:
+                real_bp_batch_exp = real_bp_batch
+                real_ep_batch_exp = real_ep_batch
             # Forward pass for batch
-            pred_costs_batch = model(params_batch_tensor, real_bp_batch, real_ep_batch)
+            pred_costs_batch = model(params_batch_tensor, real_bp_batch_exp, real_ep_batch_exp)
             # For loss, use batch mean
             bp_syn_batch = torch.cat(batch_bp_syn, dim=0)
             bp_probs_batch = torch.cat(batch_bp_probs, dim=0)
             ep_syn_batch = torch.cat(batch_ep_syn, dim=0)
             ep_probs_batch = torch.cat(batch_ep_probs, dim=0)
+            # Ensure correct shape for batch tensors
+            if bp_syn_batch.dim() == 4 and bp_syn_batch.size(1) == 1:
+                bp_syn_batch = bp_syn_batch.squeeze(1)
+            if ep_syn_batch.dim() == 4 and ep_syn_batch.size(1) == 1:
+                ep_syn_batch = ep_syn_batch.squeeze(1)
+            if bp_probs_batch.dim() == 3 and bp_probs_batch.size(1) == 1:
+                bp_probs_batch = bp_probs_batch.squeeze(1)
+            if ep_probs_batch.dim() == 3 and ep_probs_batch.size(1) == 1:
+                ep_probs_batch = ep_probs_batch.squeeze(1)
             total_loss_val_batch, cost_loss_batch, count_loss_batch, coord_reg_batch = hierarchical_loss_function(
                 pred_costs_batch, true_costs_batch_tensor, bp_syn_batch, bp_probs_batch, ep_syn_batch, ep_probs_batch, real_bp, real_ep
             )
@@ -412,38 +437,48 @@ if __name__ == "__main__":
             rel_error_history.pop(0)
             
         # Accuracy: percent of rel_error < 0.1 in last 1000 samples
-        accuracy_1000 = 100.0 * sum(e < accuracy_threshold for e in rel_error_history) / len(rel_error_history)
-        
+        if len(rel_error_history) > 0:
+            accuracy_1000 = 100.0 * sum(e < accuracy_threshold for e in rel_error_history) / len(rel_error_history)
+        else:
+            accuracy_1000 = 0.0
+
+        # Use last values from previous batch for logging
+        if len(batch_pred_cost_vals) > 0:
+            pred_cost_val = batch_pred_cost_vals[-1]
+        else:
+            pred_cost_val = float('nan')
+        if len(batch_true_cost_vals) > 0:
+            true_cost_val = batch_true_cost_vals[-1]
+        else:
+            true_cost_val = float('nan')
+        rel_error = abs(pred_cost_val - true_cost_val) / (abs(true_cost_val) + 1e-8)
+
         # Adaptive learning rate adjustment
         current_lr = optimizer.param_groups[0]['lr']
-        if total_samples % lr_patience == 0 and total_samples > 1000:  # Check every lr_patience samples after warmup
+        if total_samples % lr_patience == 0 and total_samples > 1000:
             avg_rel_error_1000 = sum(rel_error_history) / len(rel_error_history)
-            
-            # Decay learning rate if model is performing well
             if avg_rel_error_1000 < lr_decay_threshold and current_lr > lr_min:
                 new_lr = max(current_lr * lr_decay_factor, lr_min)
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = new_lr
                 print(f"\nLearning rate adapted: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
-            
-            # Increase learning rate if model is struggling (relative error > 0.2)
             elif avg_rel_error_1000 > 0.2 and current_lr < initial_lr:
                 new_lr = min(current_lr / lr_decay_factor, initial_lr)
                 for param_group in optimizer.param_groups:
                     param_group['lr'] = new_lr
                 print(f"\nLearning rate increased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
-        
+
         # Print progress with meaningful metrics
-        print_training_progress(idx, num_runs, start_run, avg_loss, total_loss_val.item(), 
+        print_training_progress(idx, num_runs, start_run, avg_loss, total_loss_val.item(),
                                cost_loss.item(), accuracy_1000, current_lr, start_time,
-                               rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost)
-        
+                               rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost_val)
+
         clear_surrogate_dir()
-        
+
         # Write to CSV with hierarchical loss components
         run_number = start_run + idx + 1
-        log_training_step(csv_file, run_number, total_loss_val.item(), cost_loss.item(), 
-                         coord_reg.item(), pred_cost.item(), true_cost, params, 
+        log_training_step(csv_file, run_number, total_loss_val.item(), cost_loss.item(),
+                         coord_reg.item(), pred_cost_val, true_cost_val, params,
                          avg_loss, avg_loss_change)
     print()  # Newline after progress bar
     torch.save(model.state_dict(), model_name)
