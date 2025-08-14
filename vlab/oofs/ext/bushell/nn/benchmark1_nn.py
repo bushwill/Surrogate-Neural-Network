@@ -8,26 +8,11 @@ import shutil
 import csv
 import numpy as np
 from plant_comparison_nn import read_real_plants
-from utils_nn import build_random_parameter_file, generate_and_evaluate
+from utils_nn import build_random_parameter_file, generate_and_evaluate, compute_normalization_stats
 
-model_name = "benchmark_surrogate_model.pt"
+model_name = "benchmark1_batch_surrogate_model.pt"
 accuracy_threshold = 0.01
 batch_size = 16
-
-# Remove the hard-coded normalization constants and add a helper function:
-def compute_normalization_stats(num_samples, real_bp, real_ep):
-    params_collection = []
-    cost_collection = []
-    temp_file = "surrogate_params_temp.vset"
-    for i in range(num_samples):
-        clear_surrogate_dir()
-        p = build_random_parameter_file(temp_file)
-        c = generate_and_evaluate(temp_file, real_bp, real_ep)
-        if np.isfinite(c) and c >= 0:
-            params_collection.append(p)
-            cost_collection.append(c)
-    return (np.mean(params_collection, axis=0), np.std(params_collection, axis=0),
-            np.mean(cost_collection), np.std(cost_collection))
 
 # Remove default normalization values:
 # param_mean = np.array([...])

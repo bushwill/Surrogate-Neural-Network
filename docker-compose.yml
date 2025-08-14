@@ -2,7 +2,7 @@ version: "3.8"
 
 services:
   app1:
-    container_name: instance1
+    container_name: phytmorph1
     build:
       context: .
       dockerfile: Dockerfile
@@ -11,7 +11,7 @@ services:
       - "6080:6080"
     restart: unless-stopped
   app2:
-    container_name: instance2
+    container_name: mutant1
     build:
       context: .
       dockerfile: Dockerfile
@@ -20,7 +20,7 @@ services:
       - "6081:6080"
     restart: unless-stopped
   app3:
-    container_name: mutant1
+    container_name: benchmark1
     build:
       context: .
       dockerfile: Dockerfile
@@ -29,7 +29,7 @@ services:
       - "6082:6080"
     restart: unless-stopped
   app4:
-    container_name: mutant2
+    container_name: benchmark2
     build:
       context: .
       dockerfile: Dockerfile

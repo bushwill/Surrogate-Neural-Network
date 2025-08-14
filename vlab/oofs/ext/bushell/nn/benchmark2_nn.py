@@ -1,0 +1,217 @@
+import torch
+import torch.nn as nn
+import os
+import sys
+import time as t
+import subprocess
+import shutil
+import csv
+import numpy as np
+from plant_comparison_nn import read_real_plants
+from utils_nn import build_random_parameter_file, generate_and_evaluate, compute_normalization_stats
+
+model_name = "benchmark2_batch_surrogate_model.pt"
+accuracy_threshold = 0.01
+batch_size = 16
+
+# Remove default normalization values:
+# param_mean = np.array([...])
+# param_std  = np.array([...])
+# cost_mean = 65403.89308560747
+# cost_std  = 7702.132079934675
+
+param_mean = None
+param_std = None
+cost_mean = None
+cost_std = None
+
+def normalize(x, mean, std):
+    return (np.array(x) - mean) / (std + 1e-8)
+
+def denormalize(x, mean, std):
+    return np.array(x) * (std + 1e-8) + mean
+
+class PlantSurrogateNet(nn.Module):
+    def __init__(self, input_dim=13, output_dim=1):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 64),
+            nn.ReLU(),
+            nn.Linear(64, output_dim)
+        )
+    def forward(self, x):
+        return self.net(x)
+
+def clear_surrogate_dir():
+    folder = "surrogate"
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    else:
+        for filename in os.listdir(folder):
+            file_path = os.path.join(folder, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+            
+if __name__ == "__main__":
+    import time
+    clear_surrogate_dir()
+    
+    # Get number of runs from command line, default to 1000
+    if len(sys.argv) > 1:
+        try:
+            num_runs = int(sys.argv[1])
+        except ValueError:
+            print("Invalid argument for number of runs, using default 1000.")
+            num_runs = 1000
+    else:
+        num_runs = 1000
+
+    # Read csv file
+    csv_file = model_name + ".csv"
+    if os.path.exists(csv_file):
+        with open(csv_file, "r") as f:
+            reader = csv.reader(f)
+            existing_rows = list(reader)
+            start_run = len(existing_rows) - 1  # subtract header
+            # Read previous losses (skip header)
+            prev_losses = []
+            for row in existing_rows[1:]:
+                try:
+                    prev_losses.append(float(row[4]))  # Use loss column (index 4)
+                except Exception:
+                    pass
+    else:
+        start_run = 0
+        prev_losses = []
+    write_header = not os.path.exists(csv_file)
+    with open(csv_file, "a", newline="") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "loss", "pred_cost", "true_cost"] + [f"param_{i}" for i in range(13)])
+            
+    model = PlantSurrogateNet()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    loss_fn = nn.MSELoss()
+
+    # Always load if exists, but always train
+    if os.path.exists(model_name):
+        model.load_state_dict(torch.load(model_name))
+        print(f"Loaded existing model from {model_name}")
+    else:
+        print(f"No existing model found at {model_name}, creating new model.")
+    model.train()
+    print("Reading real plants...")
+    real_bp, real_ep = read_real_plants()
+    print("Computing normalization statistics from lpfg outputs...")
+    num_samples = 100  # adjust as needed for a robust estimate
+    computed_param_mean, computed_param_std, computed_cost_mean, computed_cost_std = compute_normalization_stats(num_samples, real_bp, real_ep)
+    print(f"Computed param_mean: {computed_param_mean}")
+    print(f"Computed param_std: {computed_param_std}")
+    print(f"Computed cost_mean: {computed_cost_mean}")
+    print(f"Computed cost_std: {computed_cost_std}")
+
+    # Set the computed normalization parameters for subsequent training
+    param_mean = computed_param_mean
+    param_std = computed_param_std
+    cost_mean = computed_cost_mean
+    cost_std = computed_cost_std
+    
+    print(f"Starting training with {num_runs} plants...")
+    
+    total_loss = sum(prev_losses)
+    total_samples = len(prev_losses)
+    avg_loss_change_history = []
+    rel_error_history = []
+
+    start_time = time.time()
+
+    sample_times = []  # Track the time taken for each sample
+
+    for idx in range(num_runs):
+        sample_start_time = time.time()  # Start timing the current sample
+        clear_surrogate_dir()
+        # 1. Generate random parameters and write to file
+        params = build_random_parameter_file("surrogate_params.vset")
+        # 2. Get true cost from L-system
+        true_cost = generate_and_evaluate("surrogate_params.vset", real_bp, real_ep)
+
+        # Validate true_cost to ensure it's within a reasonable range
+        if not np.isfinite(true_cost) or true_cost < 0:
+            print(f"Warning: Invalid true_cost value {true_cost}. Skipping this sample.")
+            continue
+
+        # Normalize the current sample's parameters and true cost
+        params_np = np.array([params])
+        true_cost_np = np.array([true_cost])
+        params_tensor = torch.tensor(normalize(params_np, param_mean, param_std), dtype=torch.float32)
+        true_cost_tensor = torch.tensor(normalize(true_cost_np, cost_mean, cost_std), dtype=torch.float32).unsqueeze(1)
+
+        # Predict cost and calculate loss for the current sample
+        pred_cost_tensor = model(params_tensor)
+        loss = loss_fn(pred_cost_tensor, true_cost_tensor)
+
+        # Update the model immediately after each sample
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # Denormalize prediction for reporting
+        pred_cost_val = denormalize(pred_cost_tensor.detach().squeeze().numpy(), cost_mean, cost_std)
+        rel_error = abs(pred_cost_val - true_cost) / (abs(true_cost) + 1e-8)
+        rel_error_history.append(rel_error)
+        if len(rel_error_history) > 1000:
+            rel_error_history.pop(0)
+
+        total_loss += (pred_cost_val - true_cost) ** 2
+        total_samples += 1
+        avg_loss = total_loss / total_samples
+        timestamp = t.strftime("%Y-%m-%d %H:%M:%S")
+        if total_samples > 1:
+            prev_avg_loss = (total_loss - (pred_cost_val - true_cost) ** 2) / (total_samples - 1)
+            avg_loss_change = avg_loss - prev_avg_loss
+        else:
+            avg_loss_change = 0.0
+        avg_loss_change_history.append(avg_loss_change)
+        if len(avg_loss_change_history) > 1000:
+            avg_loss_change_history.pop(0)
+        avg_loss_change_1000 = sum(avg_loss_change_history) / len(avg_loss_change_history)
+
+        # Accuracy: percent of rel_error < 0.1 in last 1000 samples
+        accuracy_1000 = 100.0 * sum(e < accuracy_threshold for e in rel_error_history) / len(rel_error_history)
+
+        # Progress and ETA: use the current run's counter instead of overall samples_done
+        current_run = idx + 1
+        overall_sample = start_run + current_run
+        percent = 100.0 * current_run / num_runs  # progress for this run only
+        sample_time = time.time() - sample_start_time  # Time taken for the current sample
+        sample_times.append(sample_time)
+        avg_time_per_sample = sum(sample_times) / len(sample_times)
+        samples_left = max(0, num_runs - current_run)  # remaining in current run
+
+        if samples_left > 0:
+            eta = samples_left * avg_time_per_sample
+            eta_str = time.strftime('%H:%M:%S', time.gmtime(eta))
+        else:
+            eta_str = "00:00:00"  # finished
+        
+        # Print information for the current sample using overall_sample for display
+        print(
+            f"{timestamp} - Sample {overall_sample}, ({percent:.2f}%): "
+            f"avg_avg_loss_change={avg_loss_change_1000:.4f}, "
+            f"avg_loss={avg_loss:.4f}, rel_error={rel_error:.4f}, "
+            f"acc_1000={accuracy_1000:.2f}%, ETA={eta_str}"
+        )
+
+        # Save the current sample's data to the CSV file using overall_sample
+        with open(csv_file, "a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                [overall_sample, timestamp, f"{avg_loss:.4f}", f"{avg_loss_change:.4f}", f"{loss.item():.4f}", f"{pred_cost_val:.4f}", f"{true_cost:.4f}"] +
+                [f"{p:.4f}" for p in params]
+            )
+    print()  # Newline after progress bar
+    torch.save(model.state_dict(), model_name)
+    print(f"Trained and saved new model to {model_name}")
+    print(f"Total samples: {total_samples}, Total loss: {total_loss:.4f}, Average loss: {avg_loss:.4f}")

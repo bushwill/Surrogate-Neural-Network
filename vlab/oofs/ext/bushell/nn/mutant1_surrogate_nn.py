@@ -15,7 +15,7 @@ import time as t
 import csv
 import numpy as np
 from plant_comparison_nn import make_matrix, make_index, calculate_cost, read_real_plants
-from utils_nn import (build_random_parameter_file, get_normalization_stats, generateSurrogatePlant, 
+from utils_nn import (build_random_parameter_file, compute_normalization_stats, generateSurrogatePlant, 
                       clear_surrogate_dir, setup_training_csv, 
                       log_training_step, print_training_progress, read_syn_plant_surrogate,
                       generate_and_evaluate)
@@ -149,7 +149,11 @@ class HierarchicalPlantSurrogateNet(nn.Module):
         self.cost_aggregator = CostAggregationNet(max_days)
         
         # Retrieve normalization stats for inputs and outputs
-        self.input_mean, self.input_std, self.output_mean, self.output_std = get_normalization_stats()
+        input_mean, input_std, output_mean, output_std = compute_normalization_stats()
+        self.input_mean = torch.tensor(input_mean, dtype=torch.float32)
+        self.input_std = torch.tensor(input_std, dtype=torch.float32)
+        self.output_mean = torch.tensor(output_mean, dtype=torch.float32)
+        self.output_std = torch.tensor(output_std, dtype=torch.float32)
         
     def forward(self, x, real_bp_batch=None, real_ep_batch=None):
         batch_size = x.size(0)

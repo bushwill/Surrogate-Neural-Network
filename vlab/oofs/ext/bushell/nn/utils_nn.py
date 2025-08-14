@@ -137,80 +137,24 @@ def calculate_intrinsic_cost(bp_data, ep_data):
     # Keep it simple - just clamp to reasonable range
     return max(5000.0, min(150000.0, total_cost))
 
-def get_normalization_stats(model_name=None):
-    """
-    Returns normalization statistics for the surrogate model.
-    If model_name is provided, attempts to load stats from CSV file.
-    Otherwise returns reasonable defaults based on parameter ranges.
-    """
-    # Attempt to load from existing training data if available
-    if model_name:
-        csv_file = model_name + ".csv"
-        if os.path.exists(csv_file):
-            try:
-                import pandas as pd
-                df = pd.read_csv(csv_file)
-                if len(df) > 10:  # Need sufficient data
-                    # Calculate input stats from parameter columns (last 13 columns)
-                    param_cols = [f"param_{i}" for i in range(13)]
-                    if all(col in df.columns for col in param_cols):
-                        input_data = df[param_cols].values
-                        input_mean = torch.tensor(np.mean(input_data, axis=0), dtype=torch.float32)
-                        input_std = torch.tensor(np.std(input_data, axis=0) + 1e-8, dtype=torch.float32)
-                        
-                        # Calculate output stats from true_cost column
-                        if 'true_cost' in df.columns:
-                            output_data = df['true_cost'].values
-                            output_mean = torch.tensor([np.mean(output_data)], dtype=torch.float32)
-                            output_std = torch.tensor([np.std(output_data) + 1e-8], dtype=torch.float32)
-                            
-                            print(f"Loaded normalization stats from {csv_file}")
-                            return input_mean, input_std, output_mean, output_std
-            except ImportError:
-                pass  # pandas not available
-            except Exception as e:
-                print(f"Warning: Could not load stats from {csv_file}: {e}")
+# Remove the hard-coded normalization constants and add a helper function:
+def compute_normalization_stats(num_samples = 100, real_bp=None, real_ep=None):
+    if real_bp is None or real_ep is None:
+        # If no real data is provided, use synthetic data for normalization
+        real_bp, real_ep = read_real_plants()
+    params_collection = []
+    cost_collection = []
+    temp_file = "surrogate_params_temp.vset"
+    for i in range(num_samples):
+        clear_surrogate_dir()
+        p = build_random_parameter_file(temp_file)
+        c = generate_and_evaluate(temp_file, real_bp, real_ep)
+        if np.isfinite(c) and c >= 0:
+            params_collection.append(p)
+            cost_collection.append(c)
+    return (np.mean(params_collection, axis=0), np.std(params_collection, axis=0),
+            np.mean(cost_collection), np.std(cost_collection))
     
-    # Return reasonable defaults based on parameter generation ranges
-    # These match the ranges in build_random_parameter_file()
-    input_mean = torch.tensor([
-        10.0,    # max_phytomers (mean ~10)
-        3.0,     # plastochron (mean ~3)
-        0.0,     # plant_roll_angle (mean ~0, can be ±90)
-        0.0,     # plant_down_angle (mean ~0)
-        135.0,   # branch_angle (mean ~135)
-        5.0,     # leaf_len (mean ~5)
-        0.5,     # exp_leaf_wid (mean ~0.5)
-        1.0,     # leaf_wid (mean ~1)
-        90.0,    # leaf_bend_scale (mean ~90)
-        180.0,   # leaf_twist_scale (mean ~180)
-        0.7,     # node_len (mean ~0.7)
-        0.9,     # int_wid (mean ~0.9)
-        0.5      # exp_int_rad (mean ~0.5)
-    ], dtype=torch.float32)
-    
-    input_std = torch.tensor([
-        1.0,     # max_phytomers std
-        0.1,     # plastochron std
-        15.0,    # plant_roll_angle std (wider range due to chirality)
-        4.0,     # plant_down_angle std
-        5.0,     # branch_angle std
-        1.0,     # leaf_len std
-        0.01,    # exp_leaf_wid std
-        0.1,     # leaf_wid std
-        3.0,     # leaf_bend_scale std
-        3.0,     # leaf_twist_scale std
-        0.05,    # node_len std
-        0.01,    # int_wid std
-        0.01     # exp_int_rad std
-    ], dtype=torch.float32)
-    
-    # Output stats based on intrinsic cost function range
-    output_mean = torch.tensor([50000.0], dtype=torch.float32)  # Middle of 5k-300k range
-    output_std = torch.tensor([75000.0], dtype=torch.float32)   # Reasonable spread
-    
-    return input_mean, input_std, output_mean, output_std
-
 def generate_plant(param_file, output_dir):
     """
     Generate a plant using lpfg and save results in output_dir.
@@ -333,33 +277,34 @@ def generate_and_evaluate(param_file, real_bp, real_ep):
     return cost
 
 def generateSurrogatePlant(param_file, calculate_cost_fn=None):
-        """
-        Generate plant using L-system. 
-        If calculate_cost_fn is provided, returns the cost.
-        Otherwise, just generates the plant files.
-        """
-        # setup call to lpfg
-        # lpfg_command = "lpfg -w 306 256 lsystem.l view.v materials.mat -a anim.a contours.cset functions.fset functions.tset loop_parameters.vset > log.txt"
-        lpfg_command = f"lpfg -w 306 256 lsystem.l view.v materials.mat contours.cset functions.fset functions.tset {param_file} > surrogate/lpfg_log.txt"
+    """
+    Generate plant using L-system. 
+    If calculate_cost_fn is provided, returns the cost.
+    Otherwise, just generates the plant files.
+    """
+    # setup call to lpfg
+    # lpfg_command = "lpfg -w 306 256 lsystem.l view.v materials.mat -a anim.a contours.cset functions.fset functions.tset loop_parameters.vset > log.txt"
+    lpfg_command = f"lpfg -w 306 256 lsystem.l view.v materials.mat contours.cset functions.fset functions.tset {param_file} > surrogate/lpfg_log.txt"
 
-        if not os.path.exists("project"):
-            os.system("g++ -o project -Wall -Wextra project.cpp -lm")
-            
-        if not os.path.exists("surrogate"):
-            os.mkdir("surrogate")
+    if not os.path.exists("project"):
+        os.system("g++ -o project -Wall -Wextra project.cpp -lm")
+    
+    if not os.path.exists("surrogate"):
+        os.mkdir("surrogate")
 
-        # run lpfg  
-        process = subprocess.Popen(['bash', '-c', lpfg_command])
-        process.wait()
-        os.system(f"./project 2454 2056 leafposition.dat > surrogate/output.txt")
-        shutil.move("leafposition.dat", f"./surrogate")
-        
-        # If cost calculation function provided, calculate and return cost
-        if calculate_cost_fn is not None:
-            syn_bp, syn_ep = read_syn_plant_surrogate()
-            return calculate_cost_fn(syn_bp, syn_ep)
-        
-        
+    # run lpfg  
+    process = subprocess.Popen(['bash', '-c', lpfg_command])
+    process.wait()
+    os.system(f"./project 2454 2056 leafposition.dat > surrogate/output.txt")
+    dest_path = "./surrogate/leafposition.dat"
+    if os.path.exists(dest_path):
+        os.remove(dest_path)
+    shutil.move("leafposition.dat", dest_path)
+    
+    # If cost calculation function provided, calculate and return cost
+    if calculate_cost_fn is not None:
+        syn_bp, syn_ep = read_syn_plant_surrogate()
+        return calculate_cost_fn(syn_bp, syn_ep)
 def read_syn_plant_surrogate(file_name="surrogate/output.txt"):
     f = open(file_name, "r")
     lines = f.readlines()

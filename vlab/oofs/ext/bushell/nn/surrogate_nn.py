@@ -15,7 +15,7 @@ import time as t
 import csv
 import numpy as np
 from plant_comparison_nn import make_matrix, make_index, calculate_cost, read_real_plants
-from utils_nn import (build_random_parameter_file, get_normalization_stats, generateSurrogatePlant, 
+from utils_nn import (build_random_parameter_file, compute_normalization_stats, generateSurrogatePlant, 
                       clear_surrogate_dir, setup_training_csv, 
                       log_training_step, print_training_progress, read_syn_plant_surrogate,
                       generate_and_evaluate)
@@ -144,9 +144,12 @@ class HierarchicalPlantSurrogateNet(nn.Module):
         self.structure_gen = StructureGenerationNet(input_dim, max_points)
         self.hungarian_net = HungarianAssignmentNet(max_points)
         self.cost_aggregator = CostAggregationNet(max_days)
-        
         # Retrieve normalization stats for inputs and outputs
-        self.input_mean, self.input_std, self.output_mean, self.output_std = get_normalization_stats()
+        input_mean, input_std, output_mean, output_std = compute_normalization_stats()
+        self.input_mean = torch.tensor(input_mean, dtype=torch.float32)
+        self.input_std = torch.tensor(input_std, dtype=torch.float32)
+        self.output_mean = torch.tensor(output_mean, dtype=torch.float32)
+        self.output_std = torch.tensor(output_std, dtype=torch.float32)
         
     def forward(self, x, real_bp_batch=None, real_ep_batch=None):
         batch_size = x.size(0)
@@ -295,14 +298,13 @@ if __name__ == "__main__":
         clear_surrogate_dir()
         
         # 1. Generate random parameters and write to file
+        # 1. Generate random parameters and write to file
         params = build_random_parameter_file("surrogate_params.vset")
         params_tensor = torch.tensor(params, dtype=torch.float32).unsqueeze(0)
-        
+        params_tensor = params_tensor.float()  # Ensure float32 dtype
         # 2. Get true cost from L-system
         true_cost = generate_and_evaluate("surrogate_params.vset", real_bp, real_ep)
         true_cost_tensor = torch.tensor([[true_cost]], dtype=torch.float32)
-        
-        # 3. Forward pass through hierarchical model
         try:
             pred_cost = model(params_tensor, real_bp_batch, real_ep_batch)
         except RuntimeError as e:
@@ -310,7 +312,6 @@ if __name__ == "__main__":
             print(f"params_tensor shape: {params_tensor.shape}")
             print(f"real_bp_batch shape: {real_bp_batch.shape}")
             print(f"real_ep_batch shape: {real_ep_batch.shape}")
-            
             # Check structure generation output
             with torch.no_grad():
                 params_norm = (params_tensor - model.input_mean) / model.input_std
@@ -318,20 +319,16 @@ if __name__ == "__main__":
                 print(f"bp_syn shape: {bp_syn.shape}")
                 print(f"ep_syn shape: {ep_syn.shape}")
             raise e
-        
         # Get intermediate outputs for loss computation
         bp_syn, bp_probs, ep_syn, ep_probs = model.structure_gen(params_tensor)
-        
         # 4. Compute hierarchical loss
         total_loss_val, cost_loss, count_loss, coord_reg = hierarchical_loss_function(
             pred_cost, true_cost_tensor, bp_syn, bp_probs, ep_syn, ep_probs, real_bp, real_ep
         )
-        
         # 5. Backpropagation
         optimizer.zero_grad()
         total_loss_val.backward()
         optimizer.step()
-        
         # 6. Update statistics
         total_loss += cost_loss.item()  # Track only cost loss for comparison
         total_samples += 1
@@ -351,28 +348,29 @@ if __name__ == "__main__":
         
         # Compute relative error
         pred_cost_val = pred_cost.item()
-        rel_error = abs(pred_cost_val - true_cost) / (abs(true_cost) + 1e-8)
+        true_cost_val = true_cost_tensor.item()
+        rel_error = abs(pred_cost_val - true_cost_val) / (abs(true_cost_val) + 1e-8)
         rel_error_history.append(rel_error)
         if len(rel_error_history) > 1000:
             rel_error_history.pop(0)
-            
+
         # Accuracy: percent of rel_error < 0.1 in last 1000 samples
         accuracy_1000 = 100.0 * sum(e < accuracy_threshold for e in rel_error_history) / len(rel_error_history)
-        
+
         # Learning rate remains constant; no adaptation
         current_lr = optimizer.param_groups[0]['lr']
-        
+
         # Print progress with meaningful metrics
         print_training_progress(idx, num_runs, start_run, avg_loss, total_loss_val.item(), 
                                cost_loss.item(), accuracy_1000, current_lr, start_time,
-                               rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost)
-        
+                               rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost_val)
+
         clear_surrogate_dir()
-        
+
         # Write to CSV with hierarchical loss components
         run_number = start_run + idx + 1
         log_training_step(csv_file, run_number, total_loss_val.item(), cost_loss.item(), 
-                         coord_reg.item(), pred_cost.item(), true_cost, params, 
+                         coord_reg.item(), pred_cost.item(), true_cost_val, params, 
                          avg_loss, avg_loss_change)
     print()  # Newline after progress bar
     torch.save(model.state_dict(), model_name)
