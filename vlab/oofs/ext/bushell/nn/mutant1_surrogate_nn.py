@@ -382,12 +382,12 @@ if __name__ == "__main__":
             optimizer.step()
             # Update statistics for each sample in batch
             for b in range(len(batch_params)):
-                total_loss += batch_cost_losses[b].item()
+                total_loss += batch_total_loss_vals[b].item()
                 total_samples += 1
                 avg_loss = total_loss / total_samples
                 timestamp = t.strftime("%Y-%m-%d %H:%M:%S")
                 if total_samples > 1:
-                    prev_avg_loss = (total_loss - batch_cost_losses[b].item()) / (total_samples - 1)
+                    prev_avg_loss = (total_loss - batch_total_loss_vals[b].item()) / (total_samples - 1)
                     avg_loss_change = avg_loss - prev_avg_loss
                 else:
                     avg_loss_change = 0.0
@@ -415,12 +415,12 @@ if __name__ == "__main__":
                         for param_group in optimizer.param_groups:
                             param_group['lr'] = new_lr
                         print(f"\nLearning rate increased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
-                print_training_progress(total_samples, num_runs, start_run, avg_loss, batch_total_loss_vals[b].item(), 
+                sample_number = start_run + total_samples
+                print_training_progress(sample_number, num_runs, start_run, avg_loss, batch_total_loss_vals[b].item(), 
                                        batch_cost_losses[b].item(), accuracy_1000, current_lr, start_time,
                                        rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost_val)
                 clear_surrogate_dir()
-                run_number = start_run + idx - len(batch_params) + b + 2
-                log_training_step(csv_file, run_number, batch_total_loss_vals[b].item(), batch_cost_losses[b].item(), 
+                log_training_step(csv_file, sample_number, batch_total_loss_vals[b].item(), batch_cost_losses[b].item(), 
                                  batch_coord_regs[b].item(), batch_pred_cost_vals[b], batch_true_cost_vals[b], batch_params_for_csv[b], 
                                  avg_loss, avg_loss_change)
             # Reset batch
