@@ -23,6 +23,13 @@ except ImportError:
     print("Warning: Could not import HierarchicalPlantSurrogateNet from surrogate_nn")
     HierarchicalPlantSurrogateNet = None
 
+# Import PlantSurrogateNet for normal model support
+try:
+    from benchmark_nn import PlantSurrogateNet
+except ImportError:
+    print("Warning: Could not import PlantSurrogateNet from benchmark_nn")
+    PlantSurrogateNet = None
+
 # Customizable variables:
 param_min = torch.tensor([8.0, 2.8, -110.0, -4.0, 125.0, 3.0, 0.48, 0.8, 80.0, 170.0, 0.6, 0.88, 0.48])
 param_max = torch.tensor([12.0, 3.2, 110.0, 4.0, 145.0, 7.0, 0.52, 1.2, 100.0, 190.0, 0.8, 0.92, 0.52])
@@ -33,7 +40,7 @@ diversity_amount = 0.1
 accuracy_threshold = 0.01
 boundary_penalty_weight = 0.1   # New: weight for soft boundary penalty
 
-directory = "Normal Data/"
+directory = "Normal Data/Best Models/"
 optimizer_directory = "Optimizer/"
 
 # Create optimizer directory if it doesn't exist
@@ -41,12 +48,8 @@ if not os.path.exists(optimizer_directory):
     os.makedirs(optimizer_directory)
 
 surrogate_models = [
-    # Format: [model_file, model_type, model_class]
-    ["Normal Data/Best Models/surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],  # Original hierarchical
-    ["test_surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],  # Your best performing model (0.003 regularization)
-    # Add your mutant models when ready for comparison
-    # ["mutant1_surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],
-    # ["mutant2_surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],
+    ["mutant2_surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],  # Mutant2 hierarchical model
+    ["batch_16_plant_surrogate_model.pt", "normal", PlantSurrogateNet],  # Batch-16 normal model
 ]
 
 for i in range(len(surrogate_models)):
