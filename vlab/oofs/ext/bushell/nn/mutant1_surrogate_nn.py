@@ -256,10 +256,7 @@ if __name__ == "__main__":
     # Initialize training statistics and learning rate schedule variables
     rel_error_history = []
     avg_loss_change_history = []
-    lr_patience = 100  # Check every N samples for adaptation
-    lr_decay_threshold = 0.1
-    lr_min = 1e-6
-    lr_decay_factor = 0.95
+    # Learning rate adaptation variables removed; constant learning rate
     start_time = t.time()
     total_samples = 0
     total_loss = 0.0
@@ -344,101 +341,84 @@ if __name__ == "__main__":
         batch_params_for_csv.append(params)
         batch_pred_cost_vals.append(pred_cost.item())
         batch_true_cost_vals.append(true_cost)
-        # If batch is full or last sample, update model
-        if (len(batch_params) == batch_size) or (idx == num_runs - 1):
-            params_batch_tensor = torch.cat(batch_params, dim=0)
-            true_costs_batch_tensor = torch.cat(batch_true_costs, dim=0)
-            # Ensure correct shape for params_batch_tensor
-            if params_batch_tensor.dim() == 3 and params_batch_tensor.size(1) == 1:
-                params_batch_tensor = params_batch_tensor.squeeze(1)
-            # Expand real_bp_batch and real_ep_batch to match batch size if needed
-            if real_bp_batch.size(0) == 1 and params_batch_tensor.size(0) > 1:
-                real_bp_batch_exp = real_bp_batch.expand(params_batch_tensor.size(0), -1, -1, -1)
-                real_ep_batch_exp = real_ep_batch.expand(params_batch_tensor.size(0), -1, -1, -1)
-            else:
-                real_bp_batch_exp = real_bp_batch
-                real_ep_batch_exp = real_ep_batch
-            # Forward pass for batch
-            pred_costs_batch = model(params_batch_tensor, real_bp_batch_exp, real_ep_batch_exp)
-            # For loss, use batch mean
-            bp_syn_batch = torch.cat(batch_bp_syn, dim=0)
-            bp_probs_batch = torch.cat(batch_bp_probs, dim=0)
-            ep_syn_batch = torch.cat(batch_ep_syn, dim=0)
-            ep_probs_batch = torch.cat(batch_ep_probs, dim=0)
-            # Ensure correct shape for batch tensors
-            if bp_syn_batch.dim() == 4 and bp_syn_batch.size(1) == 1:
-                bp_syn_batch = bp_syn_batch.squeeze(1)
-            if ep_syn_batch.dim() == 4 and ep_syn_batch.size(1) == 1:
-                ep_syn_batch = ep_syn_batch.squeeze(1)
-            if bp_probs_batch.dim() == 3 and bp_probs_batch.size(1) == 1:
-                bp_probs_batch = bp_probs_batch.squeeze(1)
-            if ep_probs_batch.dim() == 3 and ep_probs_batch.size(1) == 1:
-                ep_probs_batch = ep_probs_batch.squeeze(1)
-            total_loss_val_batch, cost_loss_batch, count_loss_batch, coord_reg_batch = hierarchical_loss_function(
-                pred_costs_batch, true_costs_batch_tensor, bp_syn_batch, bp_probs_batch, ep_syn_batch, ep_probs_batch, real_bp, real_ep
-            )
-            optimizer.zero_grad()
-            total_loss_val_batch.backward()
-            optimizer.step()
-            # Update statistics for each sample in batch
-            for b in range(len(batch_params)):
-                total_loss += batch_total_loss_vals[b].item()
-                total_samples += 1
-                avg_loss = total_loss / total_samples
-                timestamp = t.strftime("%Y-%m-%d %H:%M:%S")
-                if total_samples > 1:
-                    prev_avg_loss = (total_loss - batch_total_loss_vals[b].item()) / (total_samples - 1)
-                    avg_loss_change = avg_loss - prev_avg_loss
-                else:
-                    avg_loss_change = 0.0
-                avg_loss_change_history.append(avg_loss_change)
-                if len(avg_loss_change_history) > 1000:
-                    avg_loss_change_history.pop(0)
-                avg_loss_change_1000 = sum(avg_loss_change_history) / len(avg_loss_change_history)
-                pred_cost_val = batch_pred_cost_vals[b]
-                true_cost_val = batch_true_cost_vals[b]
-                rel_error = abs(pred_cost_val - true_cost_val) / (abs(true_cost_val) + 1e-8)
-                rel_error_history.append(rel_error)
-                if len(rel_error_history) > 1000:
-                    rel_error_history.pop(0)
-                accuracy_1000 = 100.0 * sum(e < accuracy_threshold for e in rel_error_history) / len(rel_error_history)
-                current_lr = optimizer.param_groups[0]['lr']
-                if total_samples % lr_patience == 0 and total_samples > 1000:
-                    avg_rel_error_1000 = sum(rel_error_history) / len(rel_error_history)
-                    if avg_rel_error_1000 < lr_decay_threshold and current_lr > lr_min:
-                        new_lr = max(current_lr * lr_decay_factor, lr_min)
-                        for param_group in optimizer.param_groups:
-                            param_group['lr'] = new_lr
-                        print(f"\nLearning rate adapted: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
-                    elif avg_rel_error_1000 > 0.2 and current_lr < initial_lr:
-                        new_lr = min(current_lr / lr_decay_factor, initial_lr)
-                        for param_group in optimizer.param_groups:
-                            param_group['lr'] = new_lr
-                        print(f"\nLearning rate increased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
-                sample_number = start_run + total_samples
-                print_training_progress(sample_number, num_runs, start_run, avg_loss, batch_total_loss_vals[b].item(), 
-                                       batch_cost_losses[b].item(), accuracy_1000, current_lr, start_time,
-                                       rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost_val)
-                clear_surrogate_dir()
-                log_training_step(csv_file, sample_number, batch_total_loss_vals[b].item(), batch_cost_losses[b].item(), 
-                                 batch_coord_regs[b].item(), batch_pred_cost_vals[b], batch_true_cost_vals[b], batch_params_for_csv[b], 
-                                 avg_loss, avg_loss_change)
-            # Reset batch
-            batch_params = []
-            batch_true_costs = []
-            batch_pred_costs = []
-            batch_bp_syn = []
-            batch_bp_probs = []
-            batch_ep_syn = []
-            batch_ep_probs = []
-            batch_total_loss_vals = []
-            batch_cost_losses = []
-            batch_count_losses = []
-            batch_coord_regs = []
-            batch_params_for_csv = []
-            batch_pred_cost_vals = []
-            batch_true_cost_vals = []
+
+        # Update statistics and log for each sample (outer loop)
+        total_loss += total_loss_val.item()
+        total_samples += 1
+        avg_loss = total_loss / total_samples
+        timestamp = t.strftime("%Y-%m-%d %H:%M:%S")
+        if total_samples > 1:
+            prev_avg_loss = (total_loss - total_loss_val.item()) / (total_samples - 1)
+            avg_loss_change = avg_loss - prev_avg_loss
+        else:
+            avg_loss_change = 0.0
+        avg_loss_change_history.append(avg_loss_change)
+        if len(avg_loss_change_history) > 1000:
+            avg_loss_change_history.pop(0)
+        avg_loss_change_1000 = sum(avg_loss_change_history) / len(avg_loss_change_history)
+        pred_cost_val = pred_cost.item()
+        true_cost_val = true_cost_tensor.item()
+        rel_error = abs(pred_cost_val - true_cost_val) / (abs(true_cost_val) + 1e-8)
+        rel_error_history.append(rel_error)
+        if len(rel_error_history) > 1000:
             rel_error_history.pop(0)
+    accuracy_1000 = 100.0 * sum(e < accuracy_threshold for e in rel_error_history) / len(rel_error_history)
+    current_lr = optimizer.param_groups[0]['lr']
+    print_training_progress(total_samples, num_runs, start_run, avg_loss, total_loss_val.item(),
+                   cost_loss.item(), accuracy_1000, current_lr, start_time,
+                   rel_error=rel_error, pred_cost=pred_cost_val, true_cost=true_cost_val)
+    clear_surrogate_dir()
+    run_number = start_run + idx + 1
+    log_training_step(csv_file, run_number, total_loss_val.item(), cost_loss.item(),
+             coord_reg.item(), pred_cost_val, true_cost_val, params,
+             avg_loss, avg_loss_change)
+
+    # Only update model every batch_size samples, or at the last sample
+    if (len(batch_params) == batch_size) or (idx == num_runs - 1):
+        params_batch_tensor = torch.cat(batch_params, dim=0)
+        true_costs_batch_tensor = torch.cat(batch_true_costs, dim=0)
+        if params_batch_tensor.dim() == 3 and params_batch_tensor.size(1) == 1:
+            params_batch_tensor = params_batch_tensor.squeeze(1)
+        if real_bp_batch.size(0) == 1 and params_batch_tensor.size(0) > 1:
+            real_bp_batch_exp = real_bp_batch.expand(params_batch_tensor.size(0), -1, -1, -1)
+            real_ep_batch_exp = real_ep_batch.expand(params_batch_tensor.size(0), -1, -1, -1)
+        else:
+            real_bp_batch_exp = real_bp_batch
+            real_ep_batch_exp = real_ep_batch
+        pred_costs_batch = model(params_batch_tensor, real_bp_batch_exp, real_ep_batch_exp)
+        bp_syn_batch = torch.cat(batch_bp_syn, dim=0)
+        bp_probs_batch = torch.cat(batch_bp_probs, dim=0)
+        ep_syn_batch = torch.cat(batch_ep_syn, dim=0)
+        ep_probs_batch = torch.cat(batch_ep_probs, dim=0)
+        if bp_syn_batch.dim() == 4 and bp_syn_batch.size(1) == 1:
+            bp_syn_batch = bp_syn_batch.squeeze(1)
+        if ep_syn_batch.dim() == 4 and ep_syn_batch.size(1) == 1:
+            ep_syn_batch = ep_syn_batch.squeeze(1)
+        if bp_probs_batch.dim() == 3 and bp_probs_batch.size(1) == 1:
+            bp_probs_batch = bp_probs_batch.squeeze(1)
+        if ep_probs_batch.dim() == 3 and ep_probs_batch.size(1) == 1:
+            ep_probs_batch = ep_probs_batch.squeeze(1)
+        total_loss_val_batch, cost_loss_batch, count_loss_batch, coord_reg_batch = hierarchical_loss_function(
+            pred_costs_batch, true_costs_batch_tensor, bp_syn_batch, bp_probs_batch, ep_syn_batch, ep_probs_batch, real_bp, real_ep
+        )
+        optimizer.zero_grad()
+        total_loss_val_batch.backward()
+        optimizer.step()
+        # Reset batch
+        batch_params = []
+        batch_true_costs = []
+        batch_pred_costs = []
+        batch_bp_syn = []
+        batch_bp_probs = []
+        batch_ep_syn = []
+        batch_ep_probs = []
+        batch_total_loss_vals = []
+        batch_cost_losses = []
+        batch_count_losses = []
+        batch_coord_regs = []
+        batch_params_for_csv = []
+        batch_pred_cost_vals = []
+        batch_true_cost_vals = []
             
         # Accuracy: percent of rel_error < 0.1 in last 1000 samples
         if len(rel_error_history) > 0:
@@ -457,20 +437,7 @@ if __name__ == "__main__":
             true_cost_val = float('nan')
         rel_error = abs(pred_cost_val - true_cost_val) / (abs(true_cost_val) + 1e-8)
 
-        # Adaptive learning rate adjustment
-        current_lr = optimizer.param_groups[0]['lr']
-        if total_samples % lr_patience == 0 and total_samples > 1000:
-            avg_rel_error_1000 = sum(rel_error_history) / len(rel_error_history)
-            if avg_rel_error_1000 < lr_decay_threshold and current_lr > lr_min:
-                new_lr = max(current_lr * lr_decay_factor, lr_min)
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = new_lr
-                print(f"\nLearning rate adapted: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
-            elif avg_rel_error_1000 > 0.2 and current_lr < initial_lr:
-                new_lr = min(current_lr / lr_decay_factor, initial_lr)
-                for param_group in optimizer.param_groups:
-                    param_group['lr'] = new_lr
-                print(f"\nLearning rate increased: {current_lr:.6f} -> {new_lr:.6f} (avg_rel_error={avg_rel_error_1000:.4f})")
+    # Learning rate adaptation removed; constant learning rate
 
         # Print progress with meaningful metrics
         print_training_progress(total_samples, num_runs, start_run, avg_loss, total_loss_val.item(),
