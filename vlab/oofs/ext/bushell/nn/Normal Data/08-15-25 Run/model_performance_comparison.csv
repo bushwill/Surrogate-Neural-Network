@@ -1,0 +1,4 @@
+Model,Training Samples,Final Cost Loss,Final Relative Error,Final Accuracy < 1%,Final Accuracy < 5%,Final Accuracy < 10%,Mean Relative Error,Median Relative Error,Std Relative Error,R² Score,Convergence Stability
+benchmark1_batch_surrogate_model.pt,"40,000",0.016310,0.0163,43.2%,96.8%,100.0%,0.0163,0.0124,0.0141,0.9684,0.000738
+benchmark2_batch_surrogate_model.pt,"40,000",0.014519,0.0145,48.8%,98.0%,99.8%,0.0145,0.0106,0.0136,0.9705,0.000503
+surrogate_model.pt,"40,000",0.015351,0.0154,43.0%,97.0%,100.0%,0.0154,0.0115,0.0138,0.9650,0.001031
