@@ -8,11 +8,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import Circle
 import matplotlib.patches as mpatches
-from normal_hier_surrogate_nn import HierarchicalPlantSurrogateNet
+from surrogate_nn import HierarchicalPlantSurrogateNet
 from utils_nn import build_random_parameter_file
 
 # Configuration: Path to trained model
-MODEL_PATH = "Normal Data/surrogate_model.pt"
+MODEL_PATH = "Normal Data/Best Models/surrogate_model.pt"
 
 def visualize_probabilistic_plant_structure(model, params, day=25, figsize=(12, 10), 
                                           min_opacity=0.1, max_opacity=0.9, 
