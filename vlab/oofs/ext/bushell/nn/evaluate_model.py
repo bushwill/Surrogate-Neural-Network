@@ -19,7 +19,7 @@ from pathlib import Path
 # CONFIGURATION: Set the directory to scan for CSV files
 # ============================================================================
 
-CSV_DIRECTORY = "Normal Data/08-13-25 Run/"
+CSV_DIRECTORY = "Normal Data/08-15-25 Run/"
 
 def get_all_csv_files(directory):
     """Return a list of all CSV files in the given directory (non-recursive)."""
