@@ -12,7 +12,6 @@ from utils_nn import build_random_parameter_file, generate_and_evaluate, compute
 
 model_name = "benchmark2_batch_surrogate_model.pt"
 accuracy_threshold = 0.01
-batch_size = 16
 
 # Remove default normalization values:
 # param_mean = np.array([...])
