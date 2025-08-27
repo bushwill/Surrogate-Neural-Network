@@ -57,12 +57,12 @@ class StructureGenerationNet(nn.Module):
         features = self.feature_net(x)
         
         # Generate branch points
-        bp_raw = self.bp_net(features).view(-1, self.max_points, 3)
+        bp_raw = self.bp_net(features).reshape(-1, self.max_points, 3)
         bp_coords = bp_raw[:, :, :2] * 200  # Scale coordinates to reasonable range
         bp_probs = torch.sigmoid(bp_raw[:, :, 2])  # Existence probabilities
         
         # Generate end points
-        ep_raw = self.ep_net(features).view(-1, self.max_points, 3)
+        ep_raw = self.ep_net(features).reshape(-1, self.max_points, 3)
         ep_coords = ep_raw[:, :, :2] * 200  # Scale coordinates to reasonable range
         ep_probs = torch.sigmoid(ep_raw[:, :, 2])  # Existence probabilities
         
@@ -104,16 +104,16 @@ class HungarianAssignmentNet(nn.Module):
         
         # Flatten and concatenate structures
         structure_features = torch.cat([
-            bp_syn.view(batch_size, -1),
-            ep_syn.view(batch_size, -1),
-            bp_real.view(batch_size, -1),
-            ep_real.view(batch_size, -1)
+            bp_syn.reshape(batch_size, -1),
+            ep_syn.reshape(batch_size, -1),
+            bp_real.reshape(batch_size, -1),
+            ep_real.reshape(batch_size, -1)
         ], dim=1)
         
         encoded = self.structure_encoder(structure_features)
         
         # Predict assignment matrix and total cost
-        assignment_weights = self.assignment_net(encoded).view(batch_size, self.max_points, self.max_points)
+        assignment_weights = self.assignment_net(encoded).reshape(batch_size, self.max_points, self.max_points)
         total_cost = self.cost_net(encoded)
         
         return assignment_weights, total_cost

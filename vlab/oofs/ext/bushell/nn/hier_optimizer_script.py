@@ -13,7 +13,7 @@ import torch.nn as nn
 import shutil
 import csv
 import time as t
-from utils_nn import build_parameter_file, generate_and_evaluate_in_dir, get_normalization_stats
+from utils_nn import build_parameter_file, generate_and_evaluate_in_dir, compute_normalization_stats
 from plant_comparison_nn import calculate_cost, read_real_plants
 
 # Import all surrogate model types
@@ -25,7 +25,7 @@ except ImportError:
 
 # Import PlantSurrogateNet for normal model support
 try:
-    from benchmark_nn import PlantSurrogateNet
+    from benchmark1_nn import PlantSurrogateNet
 except ImportError:
     print("Warning: Could not import PlantSurrogateNet from benchmark_nn")
     PlantSurrogateNet = None
@@ -34,13 +34,13 @@ except ImportError:
 param_min = torch.tensor([8.0, 2.8, -110.0, -4.0, 125.0, 3.0, 0.48, 0.8, 80.0, 170.0, 0.6, 0.88, 0.48])
 param_max = torch.tensor([12.0, 3.2, 110.0, 4.0, 145.0, 7.0, 0.52, 1.2, 100.0, 190.0, 0.8, 0.92, 0.52])
 weight_decay = 1e-5
-num_restarts = 5
+num_restarts = 10
 batch_size = 32
 diversity_amount = 0.1
 accuracy_threshold = 0.01
 boundary_penalty_weight = 0.1   # New: weight for soft boundary penalty
 
-directory = "Normal Data/Best Models/"
+directory = "Normal Data/Final/"
 optimizer_directory = "Optimizer/"
 
 # Create optimizer directory if it doesn't exist
@@ -48,8 +48,9 @@ if not os.path.exists(optimizer_directory):
     os.makedirs(optimizer_directory)
 
 surrogate_models = [
-    ["mutant2_surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],  # Mutant2 hierarchical model
-    ["batch_16_plant_surrogate_model.pt", "normal", PlantSurrogateNet],  # Batch-16 normal model
+    ["surrogate_model.pt", "hierarchical", HierarchicalPlantSurrogateNet],  # Mutant2 hierarchical model
+    ["benchmark1_batch_surrogate_model.pt", "benchmark1-batch", PlantSurrogateNet],  # Batch-16 normal model
+    ["benchmark2_online_surrogate_model.pt", "benchmark2-online", PlantSurrogateNet],  # Batch-16 normal model
 ]
 
 for i in range(len(surrogate_models)):
@@ -104,7 +105,13 @@ def evaluate_surrogate_model(surrogate, params_batch, model_type, real_bp_batch=
             if real_bp_batch is not None and real_ep_batch is not None:
                 # For hierarchical model, we need real plant data to get proper cost predictions
                 # The model was trained to compare synthetic structures to real plants
-                return surrogate(params_batch, real_bp_batch, real_ep_batch)
+                output = surrogate(params_batch, real_bp_batch, real_ep_batch)
+                # If output is a tuple, extract the cost tensor
+                if isinstance(output, tuple):
+                    cost = output[0]
+                else:
+                    cost = output
+                return cost
             else:
                 # Fallback: structure complexity approximation (not ideal)
                 with torch.no_grad():
@@ -177,15 +184,10 @@ for model_path, model_type, model_class in surrogate_models:
         optimizer_model_path = os.path.join(optimizer_directory, model_basename.replace(".pt", "_optimizer.pt"))
         csv_file = os.path.join(optimizer_directory, model_basename + ".csv")
         
-        # Setup CSV logging
-        if os.path.exists(csv_file):
-            # (Load existing CSV data if needed)
-            pass
-        else:
-            with open(csv_file, "a", newline="") as f:
-                writer = csv.writer(f)
-                writer.writerow(["run #", "datetime", "avg_loss", "avg_loss_change", "loss", "pred_cost", "true_cost"] +
-                                [f"param_{i}" for i in range(13)])
+        # Always overwrite CSV and write header
+        with open(csv_file, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["true_cost", "pred_cost"] + [f"param_{i}" for i in range(13)])
     
         # Load the surrogate model and set it into eval mode
         surrogate = load_surrogate_model(model_path, model_type, model_class)
@@ -268,15 +270,55 @@ for model_path, model_type, model_class in surrogate_models:
                     sys.stdout.flush()
     
             noise = torch.rand(1, 1)
-            optimized_params = optimizer_net(noise).detach().numpy().flatten()
+            optimized_params_tensor = optimizer_net(noise)
+            optimized_params = optimized_params_tensor.detach().numpy().flatten()
             print(f"\nOptimized parameters (restart {restart+1}):", optimized_params)
-            param_file = os.path.join(optimizer_directory, f"optimized_params_{os.path.basename(model_path).replace('.pt','')}_restart_{restart+1}.vset")
+            # Ensure parameter batch matches real plant batch size for hierarchical model
+            if model_type == "hierarchical":
+                param_batch = optimized_params_tensor.expand(batch_size, -1)
+                pred_cost = evaluate_surrogate_model(
+                    surrogate,
+                    param_batch,
+                    model_type,
+                    real_bp_batch_expanded,
+                    real_ep_batch_expanded
+                )
+            else:
+                pred_cost = evaluate_surrogate_model(
+                    surrogate,
+                    torch.tensor(optimized_params, dtype=torch.float32).unsqueeze(0),
+                    model_type
+                )
+            # Extract scalar predicted cost
+            if isinstance(pred_cost, torch.Tensor):
+                if pred_cost.numel() == 1:
+                    pred_cost_val = float(pred_cost.item())
+                else:
+                    pred_cost_val = float(pred_cost.squeeze().mean().item())
+            elif isinstance(pred_cost, (list, tuple)):
+                # If tuple, try to extract first element and handle tensor inside
+                pc = pred_cost[0]
+                if isinstance(pc, torch.Tensor):
+                    if pc.numel() == 1:
+                        pred_cost_val = float(pc.item())
+                    else:
+                        pred_cost_val = float(pc.squeeze().mean().item())
+                else:
+                    pred_cost_val = float(pc)
+            else:
+                pred_cost_val = float(pred_cost)
+            # Evaluate real cost
+            param_file = os.path.join(optimizer_directory, f"temp_params.vset")
             build_parameter_file(param_file, optimized_params)
             clear_dir("temp_plant")
             real_cost = generate_and_evaluate_in_dir(param_file, real_bp, real_ep, "temp_plant", cost_fn=calculate_cost)
             print(f"Real cost for optimized parameters (restart {restart+1}): {real_cost:.4f}")
             clear_dir("temp_plant")
-    
+            # Log to CSV: real cost, predicted cost, parameters
+            with open(csv_file, "a", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow([real_cost, pred_cost_val] + list(optimized_params))
+
             if real_cost < best_cost:
                 best_cost = real_cost
                 best_params = optimized_params
