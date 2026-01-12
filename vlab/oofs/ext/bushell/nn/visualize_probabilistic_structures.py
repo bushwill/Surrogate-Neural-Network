@@ -12,7 +12,7 @@ from surrogate_nn import HierarchicalPlantSurrogateNet
 from utils_nn import build_random_parameter_file
 
 # Configuration: Path to trained model
-MODEL_PATH = "Normal Data/Best Models/surrogate_model.pt"
+MODEL_PATH = "Normal Data/Final/surrogate_model.pt"
 
 def visualize_probabilistic_plant_structure(model, params, day=25, figsize=(12, 10), 
                                           min_opacity=0.1, max_opacity=0.9, 
