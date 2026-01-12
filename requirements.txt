@@ -1,0 +1,8 @@
+numpy<2
+matplotlib
+pandas
+scipy
+scikit-image
+skan
+munkres
+torch

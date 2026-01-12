@@ -14,10 +14,10 @@ import sys
 import time as t
 import csv
 import numpy as np
-from plant_comparison_nn import make_matrix, make_index, calculate_cost, read_real_plants
-from utils_nn import (build_random_parameter_file, compute_normalization_stats, generateSurrogatePlant, 
+from plant_comparison_nn import read_real_plants
+from utils_nn import (build_random_parameter_file, compute_normalization_stats,
                       clear_surrogate_dir, setup_training_csv, 
-                      log_training_step, print_training_progress, read_syn_plant_surrogate,
+                      log_training_step, print_training_progress,
                       generate_and_evaluate)
 
 model_name = "surrogate_model.pt"
